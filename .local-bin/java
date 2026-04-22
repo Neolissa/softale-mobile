@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+"/mnt/c/Program Files/Android/Android Studio/jbr/bin/java.exe" "$@"
