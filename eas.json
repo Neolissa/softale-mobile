@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "preview": {
+      "developmentClient": false,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
+    "rustore": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_AUTH_MODE": "server",
+        "EXPO_PUBLIC_ECONOMY_MODE": "server"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

@@ -1,0 +1,456 @@
+{
+  "users": {
+    "release.test@softale.app": {
+      "email": "release.test@softale.app",
+      "passwordHash": "c1b8b58c3e7ac442b525e87709d5c1aef49a5d5acb70551be645887a978e238a",
+      "role": "USER",
+      "profile": {
+        "displayName": "ReleaseTester",
+        "avatarUri": null,
+        "profileSetupDone": true,
+        "aboutMe": "Тренирую диалог и границы в сложных разговорах.",
+        "friendEmails": [],
+        "xp": 124,
+        "energy": 270,
+        "completedCount": 0,
+        "lastFeedback": "",
+        "selectedQuestId": "forest-bridge",
+        "selectedDifficulty": 5,
+        "selectedStory": "forest",
+        "activeTab": "map",
+        "conflictPrimaryStyle": "avoiding",
+        "conflictSecondaryStyles": [
+          "accommodating"
+        ],
+        "diagnosticCompleted": false,
+        "selectedCourseId": "boundary-keeper",
+        "activeProgramMode": "story",
+        "unlockedEndings": [],
+        "unlockedAchievements": [],
+        "practiceStats": {
+          "answersCorrect": 0,
+          "answersIncorrect": 0,
+          "errorByType": {},
+          "wrongTacticByType": {}
+        },
+        "questRatingStats": {
+          "forest": {
+            "sum": 0,
+            "count": 0
+          },
+          "romance": {
+            "sum": 0,
+            "count": 0
+          },
+          "slytherin": {
+            "sum": 0,
+            "count": 0
+          },
+          "boss": {
+            "sum": 0,
+            "count": 0
+          },
+          "narcissist": {
+            "sum": 0,
+            "count": 0
+          }
+        },
+        "soundEnabled": true,
+        "claimedDailyEnergyAt": "2026-04-23T12:08:59.174Z",
+        "welcomeEnergyGranted": true,
+        "grantedPerfectStageIds": [],
+        "redeemedPromoCodes": [],
+        "referralInvitesCompleted": 0,
+        "unlockedPaidStageKeys": [],
+        "energyTransfersSentToday": 0,
+        "energyTransfersSentWeek": 0,
+        "lastEnergyTransferAt": null,
+        "lastSeenAt": null
+      },
+      "wallet": {
+        "xp": 124,
+        "energy": 270,
+        "level": 1
+      },
+      "createdAt": "2026-04-23T12:08:49.973Z",
+      "updatedAt": "2026-04-23T12:09:35.102Z"
+    },
+    "napishipolinke@gmail.com": {
+      "email": "napishipolinke@gmail.com",
+      "passwordHash": "7f31e87add824839a3753c746d0de07b7d4fe2469c0787520e9cd39dff40a1e4",
+      "role": "USER",
+      "profile": {
+        "displayName": "Полина",
+        "avatarUri": "blob:http://localhost:8081/e4952ad6-c77c-415f-8259-e5a5da827591",
+        "profileSetupDone": true,
+        "aboutMe": "Тренирую диалог и границы в сложных разговорах.",
+        "friendEmails": [],
+        "xp": 124,
+        "energy": 130,
+        "completedCount": 2,
+        "lastFeedback": "Квест «Стервозная начальница» завершен (10 вопросов). Ошибок: 0, штрафов: 0. Финал «Линия порядка» — хороший: в кампании «Стервозная начальница» ты навела порядок в хаосе и вернула разговор к ясным договоренностям. В решающий момент тебя услышали, и расклад сложился в твою пользу. Ты закрыла сюжет на сильной ноте и забрала лучший исход.",
+        "selectedQuestId": "forest-bridge",
+        "selectedDifficulty": 25,
+        "selectedStory": "narcissist",
+        "activeTab": "profile",
+        "conflictPrimaryStyle": "competitive",
+        "conflictSecondaryStyles": [
+          "avoiding",
+          "constructive"
+        ],
+        "diagnosticCompleted": true,
+        "selectedCourseId": "heart-lines",
+        "activeProgramMode": "story",
+        "unlockedEndings": [
+          "ending:office-icebreaker:order",
+          "ending:boss:order"
+        ],
+        "unlockedAchievements": [
+          "achievement:office-icebreaker:order",
+          "achievement:boss:order"
+        ],
+        "practiceStats": {
+          "answersCorrect": 46,
+          "answersIncorrect": 20,
+          "errorByType": {
+            "single_architect": 6,
+            "single_strategist": 3,
+            "single_single_unknown": 1,
+            "single_challenger": 5,
+            "single_boundary": 4,
+            "single_empath": 1
+          },
+          "wrongTacticByType": {
+            "architect": 6,
+            "strategist": 3,
+            "single_unknown": 1,
+            "challenger": 5,
+            "boundary": 4,
+            "empath": 1
+          }
+        },
+        "questRatingStats": {
+          "forest": {
+            "sum": 0,
+            "count": 0
+          },
+          "romance": {
+            "sum": 0,
+            "count": 0
+          },
+          "slytherin": {
+            "sum": 0,
+            "count": 0
+          },
+          "boss": {
+            "sum": 3,
+            "count": 1
+          },
+          "narcissist": {
+            "sum": 0,
+            "count": 0
+          },
+          "gryffindor_common_room": {
+            "sum": 0,
+            "count": 0
+          },
+          "ravenclaw_common_room": {
+            "sum": 0,
+            "count": 0
+          },
+          "hufflepuff_common_room": {
+            "sum": 0,
+            "count": 0
+          }
+        },
+        "soundEnabled": true,
+        "claimedDailyEnergyAt": "2026-04-23T13:47:56.568Z",
+        "welcomeEnergyGranted": true,
+        "grantedPerfectStageIds": [
+          "office-icebreaker:perfect:0",
+          "office-icebreaker:perfect:1",
+          "office-icebreaker:perfect:2",
+          "office-icebreaker:perfect:3",
+          "boss:perfect:0",
+          "boss:perfect:1",
+          "boss:perfect:2",
+          "boss:perfect:3",
+          "narcissist:perfect:0"
+        ],
+        "redeemedPromoCodes": [],
+        "referralInvitesCompleted": 0,
+        "unlockedPaidStageKeys": [],
+        "energyTransfersSentToday": 0,
+        "energyTransfersSentWeek": 0,
+        "lastEnergyTransferAt": null,
+        "lastSeenAt": "2026-04-23T17:49:03.129Z",
+        "gender": "female",
+        "isAdult18Plus": true,
+        "eventProgress": {
+          "eventId": "mindful-communication-month",
+          "joined": false,
+          "started": false,
+          "finished": false,
+          "rewardClaimed": false,
+          "currentStep": 0,
+          "completedStepIds": [],
+          "xpEarned": 0,
+          "energyEarned": 0,
+          "errors": 0,
+          "penalties": 0
+        },
+        "startedStoryIds": [
+          "boss",
+          "romance",
+          "narcissist"
+        ]
+      },
+      "wallet": {
+        "xp": 124,
+        "energy": 130,
+        "level": 1
+      },
+      "createdAt": "2026-04-23T13:43:31.336Z",
+      "updatedAt": "2026-04-23T17:49:02.781Z"
+    },
+    "rustore.smoke.1776966641951@example.com": {
+      "email": "rustore.smoke.1776966641951@example.com",
+      "passwordHash": "59b353b8cbf8afa564da8d21359da9594cd4732d39ddb9283a0158aaa3913699",
+      "role": "USER",
+      "profile": {
+        "displayName": "Smoke",
+        "avatarUri": null,
+        "profileSetupDone": true,
+        "aboutMe": "Тренирую диалог и границы в сложных разговорах.",
+        "friendEmails": [],
+        "xp": 124,
+        "energy": 150,
+        "completedCount": 0,
+        "lastFeedback": "",
+        "selectedQuestId": "forest-bridge",
+        "selectedDifficulty": 5,
+        "selectedStory": "forest",
+        "activeTab": "map",
+        "conflictPrimaryStyle": "avoiding",
+        "conflictSecondaryStyles": [
+          "accommodating"
+        ],
+        "diagnosticCompleted": false,
+        "selectedCourseId": "boundary-keeper",
+        "activeProgramMode": "story",
+        "unlockedEndings": [],
+        "unlockedAchievements": [],
+        "practiceStats": {
+          "answersCorrect": 0,
+          "answersIncorrect": 0,
+          "errorByType": {},
+          "wrongTacticByType": {}
+        },
+        "questRatingStats": {
+          "forest": {
+            "sum": 0,
+            "count": 0
+          },
+          "romance": {
+            "sum": 0,
+            "count": 0
+          },
+          "slytherin": {
+            "sum": 0,
+            "count": 0
+          },
+          "boss": {
+            "sum": 0,
+            "count": 0
+          },
+          "narcissist": {
+            "sum": 0,
+            "count": 0
+          }
+        },
+        "soundEnabled": true,
+        "claimedDailyEnergyAt": "2026-04-23T17:50:42.006Z",
+        "welcomeEnergyGranted": true,
+        "grantedPerfectStageIds": [],
+        "redeemedPromoCodes": [],
+        "referralInvitesCompleted": 0,
+        "unlockedPaidStageKeys": [],
+        "energyTransfersSentToday": 0,
+        "energyTransfersSentWeek": 0,
+        "lastEnergyTransferAt": null,
+        "lastSeenAt": null
+      },
+      "wallet": {
+        "xp": 124,
+        "energy": 150,
+        "level": 1
+      },
+      "createdAt": "2026-04-23T17:50:41.990Z",
+      "updatedAt": "2026-04-23T17:50:42.006Z"
+    }
+  },
+  "walletTransactions": [
+    {
+      "id": "8cd03971-a813-4f1f-8447-2ffa22053f20",
+      "at": "2026-04-23T12:08:59.174Z",
+      "email": "release.test@softale.app",
+      "deltaEnergy": 30,
+      "deltaXp": 0,
+      "reason": "daily_claim",
+      "meta": {}
+    },
+    {
+      "id": "55c8eabd-9030-4708-ae13-4b7151a46dc5",
+      "at": "2026-04-23T12:09:35.093Z",
+      "email": "release.test@softale.app",
+      "deltaEnergy": 120,
+      "deltaXp": 0,
+      "reason": "payment_success",
+      "meta": {
+        "provider": "rustore",
+        "orderId": "a4b05b47-17e4-48b5-975b-7141a4cac84e",
+        "amountRub": 99
+      }
+    },
+    {
+      "id": "078d7498-4af6-4ebf-9d27-62967c8c74bb",
+      "at": "2026-04-23T13:44:19.100Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": 30,
+      "deltaXp": 0,
+      "reason": "daily_claim",
+      "meta": {}
+    },
+    {
+      "id": "295003e9-1e89-49eb-9753-8f243569be26",
+      "at": "2026-04-23T13:44:23.634Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": 30,
+      "deltaXp": 0,
+      "reason": "daily_claim",
+      "meta": {}
+    },
+    {
+      "id": "a200ffa1-a58d-4705-a88f-7682260344c1",
+      "at": "2026-04-23T13:44:25.637Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": 30,
+      "deltaXp": 0,
+      "reason": "daily_claim",
+      "meta": {}
+    },
+    {
+      "id": "253f907c-9f0f-40ed-9c8b-61b890f97802",
+      "at": "2026-04-23T13:47:56.803Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": 30,
+      "deltaXp": 0,
+      "reason": "daily_claim",
+      "meta": {}
+    },
+    {
+      "id": "0c1616f2-c153-4e99-93a1-1307303ae8d9",
+      "at": "2026-04-23T14:04:45.216Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": -25,
+      "deltaXp": 0,
+      "reason": "stage_unlock",
+      "meta": {
+        "campaignId": "office-icebreaker",
+        "stageIdx": 3,
+        "stageCost": 25
+      }
+    },
+    {
+      "id": "1c57e937-9eb4-4dd9-bed9-9b0056638c2f",
+      "at": "2026-04-23T14:04:50.541Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": -30,
+      "deltaXp": 0,
+      "reason": "stage_unlock",
+      "meta": {
+        "campaignId": "office-icebreaker",
+        "stageIdx": 4,
+        "stageCost": 30
+      }
+    },
+    {
+      "id": "d3189a00-3959-4135-b47e-1eee9f66280d",
+      "at": "2026-04-23T14:06:46.056Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": -25,
+      "deltaXp": 0,
+      "reason": "stage_unlock",
+      "meta": {
+        "campaignId": "boss",
+        "stageIdx": 3,
+        "stageCost": 25
+      }
+    },
+    {
+      "id": "52ed5e7e-bcff-4607-9315-6f3334abf35e",
+      "at": "2026-04-23T14:06:51.034Z",
+      "email": "napishipolinke@gmail.com",
+      "deltaEnergy": -30,
+      "deltaXp": 0,
+      "reason": "stage_unlock",
+      "meta": {
+        "campaignId": "boss",
+        "stageIdx": 4,
+        "stageCost": 30
+      }
+    },
+    {
+      "id": "a5f18d35-ac9f-44c3-a2d4-8d0ea74c1bf1",
+      "at": "2026-04-23T17:50:42.006Z",
+      "email": "rustore.smoke.1776966641951@example.com",
+      "deltaEnergy": 30,
+      "deltaXp": 0,
+      "reason": "daily_claim",
+      "meta": {}
+    }
+  ],
+  "paymentOrders": {
+    "a4b05b47-17e4-48b5-975b-7141a4cac84e": {
+      "id": "a4b05b47-17e4-48b5-975b-7141a4cac84e",
+      "email": "release.test@softale.app",
+      "provider": "rustore",
+      "amountRub": 99,
+      "energyPack": 120,
+      "status": "paid",
+      "createdAt": "2026-04-23T12:08:59.192Z",
+      "updatedAt": "2026-04-23T12:09:35.093Z"
+    }
+  },
+  "paymentEvents": [
+    {
+      "eventId": "evt-1",
+      "provider": "rustore",
+      "orderId": "a4b05b47-17e4-48b5-975b-7141a4cac84e",
+      "status": "paid",
+      "at": "2026-04-23T12:09:35.093Z"
+    }
+  ],
+  "promoCodes": {
+    "SOFTALE-START": {
+      "energy": 40,
+      "expiresAt": "2026-12-31T23:59:59.000Z",
+      "maxActivations": 1,
+      "activatedBy": []
+    },
+    "RETURN-BOOST": {
+      "energy": 80,
+      "expiresAt": "2026-09-01T00:00:00.000Z",
+      "maxActivations": 1,
+      "activatedBy": []
+    }
+  },
+  "idempotency": {
+    "daily-1": {
+      "xp": 124,
+      "energy": 150,
+      "level": 1
+    }
+  },
+  "referrals": []
+}

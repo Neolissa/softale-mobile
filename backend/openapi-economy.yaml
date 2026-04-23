@@ -1,0 +1,66 @@
+openapi: 3.0.3
+info:
+  title: SofTale Economy API
+  version: 0.1.0
+  description: Backend contract for XP and Energy economy.
+paths:
+  /v1/economy/me:
+    get:
+      summary: Get current user economy state
+      responses:
+        "200":
+          description: Economy snapshot
+  /v1/economy/energy/claim-daily:
+    post:
+      summary: Claim daily energy bonus
+      responses:
+        "200":
+          description: Daily claim accepted
+  /v1/economy/promo/redeem:
+    post:
+      summary: Redeem promo code
+      responses:
+        "200":
+          description: Promo redeemed
+  /v1/economy/referrals/validate:
+    post:
+      summary: Validate referral after first stage completion
+      responses:
+        "200":
+          description: Referral validated
+  /v1/economy/energy/transfer:
+    post:
+      summary: Transfer energy to friend
+      responses:
+        "200":
+          description: Transfer completed
+  /v1/economy/stage/unlock:
+    post:
+      summary: Unlock paid stage
+      responses:
+        "200":
+          description: Stage unlocked
+  /v1/economy/stage/complete:
+    post:
+      summary: Complete stage and grant XP
+      responses:
+        "200":
+          description: Stage completion accepted
+  /v1/economy/payments/create:
+    post:
+      summary: Create payment order
+      responses:
+        "200":
+          description: Payment created
+  /v1/economy/payments/webhook/rustore:
+    post:
+      summary: RuStore wallet webhook
+      responses:
+        "200":
+          description: Webhook accepted
+  /v1/economy/payments/webhook/yookassa:
+    post:
+      summary: YooKassa webhook
+      responses:
+        "200":
+          description: Webhook accepted

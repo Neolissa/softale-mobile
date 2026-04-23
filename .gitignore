@@ -32,6 +32,14 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+
+# local secrets (never commit)
+secrets/
+*.enc
+*.secret
+*.token
+*.passphrase
 
 # typescript
 *.tsbuildinfo

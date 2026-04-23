@@ -1,19 +1,28 @@
 import { StatusBar } from "expo-status-bar";
+import { Audio } from "expo-av";
+import * as ImagePicker from "expo-image-picker";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { getCampaignBlockArc, getCampaignNodes, seasonalEventMvp, type QuestNarrativeNode, type SeasonalEventStep } from "./questContent";
+import { economyApi, type EconomySnapshot } from "./economyApi";
+import { authApi } from "./authApi";
+import { achievementEmojiByCampaignTier, editorialEndingByCampaignTier, editorialStepOptionsByCampaign } from "./scenarioBible";
 import {
   ActivityIndicator,
   Animated,
   Easing,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   type StyleProp,
+  Platform,
   Text,
   type TextStyle,
   TextInput,
+  Image,
   View,
   type ViewStyle,
 } from "react-native";
@@ -37,7 +46,16 @@ type AnalyticsEventType =
   | "hint_opened"
   | "drop_off"
   | "branch_shift"
-  | "ending_unlock";
+  | "ending_unlock"
+  | "answer_correct"
+  | "answer_incorrect"
+  | "stage_start"
+  | "stage_complete"
+  | "event_join"
+  | "event_step_pass"
+  | "event_step_fail"
+  | "event_complete"
+  | "event_reward_claim";
 
 type AnalyticsEvent = {
   id: string;
@@ -63,11 +81,59 @@ type UserAnalytics = {
     courseCompletions: number;
     questStarts: number;
     questCompletions: number;
+    stageStarts: number;
+    stageCompletions: number;
     stepFails: number;
     penalties: number;
     dropOffs: number;
+    answersCorrect: number;
+    answersIncorrect: number;
   };
+  answerByErrorType?: Record<string, number>;
+  answerByTactic?: Record<string, number>;
 };
+
+type PracticeStats = {
+  answersCorrect: number;
+  answersIncorrect: number;
+  errorByType: Record<string, number>;
+  wrongTacticByType: Record<string, number>;
+};
+type StageProgressSummary = {
+  stageIdx: number;
+  durationSec: number;
+  forgivenErrorByType: Record<string, number>;
+  tacticUsage: Record<BranchId, number>;
+  narrative: string;
+};
+type QuestFinalSummary = {
+  endingRoute: string;
+  endingTitle: string;
+  story: string;
+  achievementId: string;
+  achievementTitle: string;
+  achievementDetails: string;
+  achievementIcon: string;
+};
+type MapCatalogTab = "recommended" | "quests" | "courses" | "all";
+type StoryRunStatus = "not_started" | "in_progress" | "completed";
+type ExtendedNarrativeEndingId =
+  | "narcissist_free_dawn"
+  | "narcissist_living_union"
+  | "narcissist_clear_contract"
+  | "narcissist_pause_rebuild"
+  | "narcissist_thin_ice"
+  | "narcissist_golden_cage"
+  | "narcissist_fog_relapse"
+  | "narcissist_burned_heart"
+  | "romance_garden_of_two"
+  | "romance_quiet_harbor"
+  | "romance_gentle_goodbye"
+  | "romance_new_rhythm"
+  | "romance_fragile_bridge"
+  | "romance_tired_together"
+  | "romance_storm_loop"
+  | "romance_red_night";
 
 type Quest = {
   id: string;
@@ -103,16 +169,30 @@ type ForestStep = {
   tokenBank?: string[];
   targetBuilder?: string[];
   branchEffects?: Record<number, BranchId>;
+  optionNpcReactionByIndex?: Record<number, string>;
   sceneByBranch?: Record<BranchId, string>;
   endingHint?: string;
   skillSignals?: string[];
   sceneEmoji?: string;
+  dispositionText?: string;
+  opponentName?: string;
+  opponentSpeech?: string;
+  opponentAvatar?: string;
   hint: string;
   reward: number;
   image: IllustrationName;
 };
-type QuestDifficulty = 5 | 10 | 15 | 25;
-type QuestStory = "forest" | "romance" | "slytherin" | "boss" | "narcissist";
+type QuestDifficulty = 5 | 10 | 15 | 25 | 125;
+type QuestStory =
+  | "forest"
+  | "romance"
+  | "slytherin"
+  | "boss"
+  | "narcissist"
+  | "gryffindor_common_room"
+  | "ravenclaw_common_room"
+  | "hufflepuff_common_room";
+type ProfileGender = "female" | "male";
 type DifficultyConfig = {
   questions: QuestDifficulty;
   label: string;
@@ -129,15 +209,42 @@ type StoryConfig = {
   description: string;
   difficulties: QuestDifficulty[];
 };
+type QuestRatingSummary = {
+  sum: number;
+  count: number;
+};
+type QuestRatingStats = Record<QuestStory, QuestRatingSummary>;
+type EventProgress = {
+  eventId: string;
+  joined: boolean;
+  started: boolean;
+  finished: boolean;
+  rewardClaimed: boolean;
+  currentStep: number;
+  completedStepIds: string[];
+  xpEarned: number;
+  energyEarned: number;
+  errors: number;
+  penalties: number;
+};
 type ConflictStyleId = "competitive" | "avoiding" | "accommodating" | "passive_aggressive" | "constructive";
 type UserProfile = {
+  displayName: string;
+  avatarUri: string | null;
+  gender: ProfileGender;
+  isAdult18Plus: boolean;
+  profileSetupDone: boolean;
+  aboutMe: string;
+  friendEmails: string[];
   xp: number;
+  energy: number;
   completedCount: number;
   lastFeedback: string;
   selectedQuestId: string;
-  eventJoined: boolean;
+  eventProgress: EventProgress;
   selectedDifficulty: QuestDifficulty;
   selectedStory: QuestStory;
+  startedStoryIds: QuestStory[];
   activeTab: Tab;
   conflictPrimaryStyle: ConflictStyleId;
   conflictSecondaryStyles: ConflictStyleId[];
@@ -146,16 +253,38 @@ type UserProfile = {
   activeProgramMode: ProgramMode;
   unlockedEndings: string[];
   unlockedAchievements: string[];
+  practiceStats: PracticeStats;
+  questRatingStats: QuestRatingStats;
+  soundEnabled: boolean;
+  claimedDailyEnergyAt: string | null;
+  welcomeEnergyGranted: boolean;
+  grantedPerfectStageIds: string[];
+  redeemedPromoCodes: string[];
+  referralInvitesCompleted: number;
+  unlockedPaidStageKeys: string[];
+  energyTransfersSentToday: number;
+  energyTransfersSentWeek: number;
+  lastEnergyTransferAt: string | null;
+  lastSeenAt: string | null;
 };
+type UserRole = "USER" | "ADMIN";
 type AuthUser = {
   email: string;
   password: string;
+  role: UserRole;
   profile: UserProfile;
   analytics?: UserAnalytics;
 };
 type AuthStore = {
   users: Record<string, AuthUser>;
   currentEmail: string | null;
+};
+type AdminUserView = {
+  email: string;
+  role: UserRole;
+  xp: number;
+  energy: number;
+  analytics: UserAnalytics;
 };
 type DiagnosticOption = {
   text: string;
@@ -186,6 +315,53 @@ type CourseConfig = {
 
 const AUTH_STORAGE_KEY = "softale_auth_v1";
 const ANALYTICS_EVENTS_LIMIT = 400;
+const ADMIN_EMAIL = "neolissa@gmail.com";
+const ADMIN_PASSWORD = "neolissaAdmin1001001";
+const USER_EMAIL = "napishipolinke@gmail.com";
+const USER_PASSWORD = "userPolina1001001";
+const ENERGY_WELCOME_BONUS = 120;
+const ENERGY_DAILY_BONUS = 30;
+const ENERGY_REFLECTION_BONUS = 10;
+const ENERGY_PERFECT_STAGE_BONUS = 25;
+const ENERGY_REFERRAL_BONUS = 60;
+const ENERGY_REACTIVATION_7D_BONUS = 70;
+const ENERGY_REACTIVATION_14D_BONUS = 120;
+const ENERGY_REACTIVATION_30D_BONUS = 220;
+const FREE_STAGES_PER_CAMPAIGN = 3;
+const ENERGY_TRANSFER_MIN = 10;
+const ENERGY_TRANSFER_DAILY_LIMIT = 50;
+const ENERGY_TRANSFER_WEEKLY_LIMIT = 200;
+
+type PromoCampaign = {
+  code: string;
+  energy: number;
+  expiresAt: string;
+  maxActivations: number;
+};
+
+const promoCampaigns: PromoCampaign[] = [
+  { code: "SOFTALE-START", energy: 40, expiresAt: "2026-12-31T23:59:59.000Z", maxActivations: 1 },
+  { code: "RETURN-BOOST", energy: 80, expiresAt: "2026-09-01T00:00:00.000Z", maxActivations: 1 },
+];
+
+function createSeedUsers(nowIso: string): Record<string, AuthUser> {
+  return {
+    [ADMIN_EMAIL]: {
+      email: ADMIN_EMAIL,
+      password: ADMIN_PASSWORD,
+      role: "ADMIN",
+      profile: buildDefaultProfile(),
+      analytics: buildDefaultAnalytics(nowIso),
+    },
+    [USER_EMAIL]: {
+      email: USER_EMAIL,
+      password: USER_PASSWORD,
+      role: "USER",
+      profile: buildDefaultProfile(),
+      analytics: buildDefaultAnalytics(nowIso),
+    },
+  };
+}
 
 function makeEventId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -204,10 +380,54 @@ function buildDefaultAnalytics(nowIso: string): UserAnalytics {
       courseCompletions: 0,
       questStarts: 0,
       questCompletions: 0,
+      stageStarts: 0,
+      stageCompletions: 0,
       stepFails: 0,
       penalties: 0,
       dropOffs: 0,
+      answersCorrect: 0,
+      answersIncorrect: 0,
     },
+    answerByErrorType: {},
+    answerByTactic: {},
+  };
+}
+
+function buildDefaultPracticeStats(): PracticeStats {
+  return {
+    answersCorrect: 0,
+    answersIncorrect: 0,
+    errorByType: {},
+    wrongTacticByType: {},
+  };
+}
+
+function buildDefaultQuestRatingStats(): QuestRatingStats {
+  return {
+    forest: { sum: 0, count: 0 },
+    romance: { sum: 0, count: 0 },
+    slytherin: { sum: 0, count: 0 },
+    boss: { sum: 0, count: 0 },
+    narcissist: { sum: 0, count: 0 },
+    gryffindor_common_room: { sum: 0, count: 0 },
+    ravenclaw_common_room: { sum: 0, count: 0 },
+    hufflepuff_common_room: { sum: 0, count: 0 },
+  };
+}
+
+function buildDefaultEventProgress(): EventProgress {
+  return {
+    eventId: seasonalEventMvp.id,
+    joined: false,
+    started: false,
+    finished: false,
+    rewardClaimed: false,
+    currentStep: 0,
+    completedStepIds: [],
+    xpEarned: 0,
+    energyEarned: 0,
+    errors: 0,
+    penalties: 0,
   };
 }
 
@@ -248,15 +468,15 @@ const courses: CourseConfig[] = [
   {
     id: "boundary-keeper",
     title: "Хранитель границ",
-    lore: "В крепости клятв стены слышат каждое \"ладно\" и каждое \"я потерплю\". Здесь побеждает не громкость, а умение сказать \"нет\" так, чтобы достоинство осталось у всех.",
-    focus: "Научиться входить в трудный разговор без бегства и без нападения, сохраняя себя и контакт.",
-    features: ["Фразы-мостики для старта неприятной темы", "Спокойная прямота вместо оправданий и резкости", "Пошаговое укрепление личных границ в реальных сценах"],
+    lore: "В этой крепости проверяют не силу голоса, а силу спины. Каждое «ладно» здесь стоит дорого, а каждое честное «мне так не подходит» возвращает тебе опору.",
+    focus: "Говорить ясно и спокойно, когда хочется исчезнуть или сорваться, и удерживать уважение к себе без войны.",
+    features: ["Короткие фразы, которые мягко останавливают давление", "Сцены, где нужно выбрать себя без чувства вины", "Тренировка уверенного «нет» в живых диалогах"],
     recommendedFor: ["avoiding", "accommodating"],
     preferredQuestions: 10,
   },
   {
     id: "serpentine-diplomat",
-    title: "Слизеринская дипломатия",
+    title: "Кулуарная дипломатия",
     lore: "Под сводами подземелий каждое слово пахнет интригой. Ты входишь в круг, где улыбка может быть ловушкой, а молчание - приговором.",
     focus: "Превращать ядовитые выпады в хладнокровные договоренности и удерживать влияние без унижения собеседника.",
     features: ["Темное академическое фэнтези с жесткими развилками", "Каждый выбор меняет баланс статуса и доверия", "Длинная арка о власти, риске и цене решений"],
@@ -266,18 +486,18 @@ const courses: CourseConfig[] = [
   {
     id: "heart-lines",
     title: "Линии сердца",
-    lore: "Ночной город учит близости без растворения в другом. Здесь каждое признание может стать мостом - или трещиной, если предать себя.",
-    focus: "Строить близость через честность, границы и уважение к своим чувствам.",
-    features: ["Мягкое \"нет\" без вины и самонаказания", "Разговор о боли и желаниях без обвинений", "Романтическая арка, где выборы меняют доверие и тепло"],
+    lore: "Ночной город не про сказки, а про зрелость. Здесь близость рождается из честности: ты слышишь другого, но не теряешь себя.",
+    focus: "Проходить сложные разговоры в отношениях так, чтобы оставались и тепло, и границы.",
+    features: ["Фразы близости без самоотмены", "Разбор ревности, боли и ожиданий без драмы", "Выборы, от которых реально меняется доверие"],
     recommendedFor: ["accommodating", "avoiding"],
     preferredQuestions: 10,
   },
   {
     id: "mirror-of-truth",
     title: "Зеркало правды",
-    lore: "В цитадели отражений маски не держатся долго. Каждый шаг возвращается эхом и показывает, кем ты становишься в конфликте, когда ставки высоки.",
-    focus: "Сохранить зрелость под давлением: не уходить в крайности и находить решение, за которое не стыдно после.",
-    features: ["Психологические развилки повышенной сложности", "Сцены ультиматума, лжи, срыва и восстановления", "Финал, где последствия решений ощущаются по-настоящему"],
+    lore: "Здесь не получится спрятаться за привычные роли. Каждая реплика отражает тебя точнее, чем любое зеркало: кто ты в давлении, когда уже не до красивых слов.",
+    focus: "Сохранять ясность под высоким напряжением и выбирать решения, за которые себе не стыдно.",
+    features: ["Острые развилки: ультиматумы, обесценивание, шантаж", "Тонкая работа с внутренними триггерами в реальном времени", "Финалы, где последствия чувствуются телом, а не цифрами"],
     recommendedFor: ["constructive", "competitive"],
     preferredQuestions: 10,
   },
@@ -1665,7 +1885,7 @@ const courseStepPools: Record<CourseId, ForestStep[]> = {
   "serpentine-diplomat": [
     {
       id: "c-sd-01",
-      title: "Слизеринская дипломатия • Без сарказма",
+      title: "Кулуарная дипломатия • Без сарказма",
       type: "single",
       scene: "Хочется ответить колко, но задача — сохранить влияние и ясность.",
       instruction: "Выбери прямой дипломатичный ответ.",
@@ -1682,7 +1902,7 @@ const courseStepPools: Record<CourseId, ForestStep[]> = {
     },
     {
       id: "c-sd-02",
-      title: "Слизеринская дипломатия • Чистая речь",
+      title: "Кулуарная дипломатия • Чистая речь",
       type: "builder",
       scene: "Собери фразу без намеков и сарказма.",
       instruction: "Собери фразу.",
@@ -1694,7 +1914,7 @@ const courseStepPools: Record<CourseId, ForestStep[]> = {
     },
     {
       id: "c-sd-03",
-      title: "Слизеринская дипломатия • Холодная граница",
+      title: "Кулуарная дипломатия • Холодная граница",
       type: "multiple",
       scene: "Тебя втягивают в интригу против коллеги.",
       instruction: "Выбери 2 фразы, которые удерживают статус и ценности.",
@@ -1757,7 +1977,7 @@ const courseStepPools: Record<CourseId, ForestStep[]> = {
       targetBuilder: ["Мне", "дороги", "наши", "отношения,", "и", "эта", "граница", "для", "меня", "важна.", "Давай", "найдем", "решение."],
       hint: "Тепло + граница.",
       reward: 13,
-      image: "message-heart-outline",
+      image: "message-alert-outline",
     },
   ],
   "mirror-of-truth": [
@@ -1838,6 +2058,25 @@ const endingRouteName: Record<EndingRouteId, string> = {
   breakthrough: "Линия прорыва",
 };
 
+const extendedEndingMetaById: Record<ExtendedNarrativeEndingId, { label: string; icon: string; story: string }> = {
+  narcissist_free_dawn: { label: "Свободный рассвет", icon: "🌅", story: "Ты выбираешь себя и завершаешь связь спокойно, без мести и без самообмана. Разрыв становится зрелым действием и возвращает тебе опору." },
+  narcissist_living_union: { label: "Живой союз", icon: "💎", story: "Вы перестраиваете отношения в зрелый формат: границы ясны, давление не работает, тепло сохраняется без подчинения." },
+  narcissist_clear_contract: { label: "Чистый договор", icon: "🧾", story: "Вы фиксируете рабочие правила и красные линии. Меньше тумана и качелей, больше ясности и ответственности." },
+  narcissist_pause_rebuild: { label: "Пауза на сборку", icon: "🧭", story: "Вы берете дистанцию без взаимного разрушения. Это осознанная пауза, чтобы проверить, возможен ли новый формат." },
+  narcissist_thin_ice: { label: "Тонкий лед", icon: "🪞", story: "Манипуляции распознаны, но не обезврежены до конца. Контакт держится, однако остается хрупким и нестабильным." },
+  narcissist_golden_cage: { label: "Золотая клетка", icon: "⛓️", story: "Внешне связь сохраняется, но ее цена - постоянные уступки себе. Контроль и вина становятся привычным фоном." },
+  narcissist_fog_relapse: { label: "Откат в туман", icon: "🌫️", story: "Ты временами держишь позицию, но в кризисе сдаешь ее из страха потери. Старый цикл снова берет верх." },
+  narcissist_burned_heart: { label: "Выжженное сердце", icon: "🕳️", story: "Изоляция, обесценивание и качели доходят до предела. Разрыв случается в точке истощения, после тяжелого эмоционального отката." },
+  romance_garden_of_two: { label: "Сад двоих", icon: "🌷", story: "Вы удерживаете и страсть, и уважение. Конфликт становится инструментом настройки, а не полем взаимных ранений." },
+  romance_quiet_harbor: { label: "Тихая гавань", icon: "⚓", story: "Вы снижаете накал, учитесь останавливаться и возвращаться к диалогу. Связь становится надежнее и спокойнее." },
+  romance_gentle_goodbye: { label: "Бережный разрыв", icon: "🕊️", story: "Вы честно признаете несовпадение темпа и ценностей и мягко завершаете историю. Иногда это самый бережный выбор." },
+  romance_new_rhythm: { label: "Новый ритм", icon: "🎼", story: "После паузы вы пересобираете связь в новом формате: меньше тестов на лояльность, больше ясных договоренностей." },
+  romance_fragile_bridge: { label: "Хрупкий мост", icon: "🫧", story: "Тепло есть, но в стрессе всплывают старые паттерны. Мост держится, однако требует постоянного ремонта." },
+  romance_tired_together: { label: "Усталое рядом", icon: "💔", story: "Вы остаетесь вместе из страха потери. Близость становится поверхностной, а обиды медленно вытесняют живой контакт." },
+  romance_storm_loop: { label: "Штормовая петля", icon: "🌪️", story: "Ссоры и примирения ходят по кругу, не приводя к изменениям. Эмоций много, устойчивости мало." },
+  romance_red_night: { label: "Красная ночь", icon: "🩸", story: "История уходит в тяжелый разрыв на пике боли. Этот финал останавливает взаимное разрушение, но оставляет глубокий след." },
+};
+
 const endingRouteByBranch: Record<BranchId, EndingRouteId> = {
   strategist: "order",
   architect: "order",
@@ -1880,9 +2119,12 @@ const campaignLore: Record<CampaignId, { title: string; setting: string; tone: s
   slytherin: { title: "Гостиная Слизерина", setting: "в подземельях древней академии", tone: "тёмно-академическом", icon: "snake" },
   boss: { title: "Стервозная начальница", setting: "в стеклянной башне корпоративных интриг", tone: "жёсткой рабочей драмы", icon: "briefcase-account-outline" },
   narcissist: { title: "Влюбись в нарцисса", setting: "в зеркальном дворце обещаний и иллюзий", tone: "психологического триллера", icon: "account-heart-outline" },
+  gryffindor_common_room: { title: "Гостиная Гриффиндора", setting: "у алого камина, где спорят о лидерстве", tone: "огненно-соревновательном", icon: "fire-circle" },
+  ravenclaw_common_room: { title: "Гостиная Когтеврана", setting: "под сводами библиотеки, где правят аргументы", tone: "холодно-интеллектуальном", icon: "book-open-page-variant-outline" },
+  hufflepuff_common_room: { title: "Гостиная Пуффендуя", setting: "в теплой комнате, где избегают острых тем", tone: "мягко-напряженном", icon: "flower-outline" },
   "office-icebreaker": { title: "Ледокол переговоров", setting: "на ледяном флоте переговоров", tone: "лидерского приключения", icon: "ferry" },
   "boundary-keeper": { title: "Хранитель границ", setting: "в каменной крепости личных клятв", tone: "героического взросления", icon: "shield-outline" },
-  "serpentine-diplomat": { title: "Слизеринская дипломатия", setting: "в лабиринте власти, слухов и альянсов", tone: "интриги и высокого риска", icon: "snake" },
+  "serpentine-diplomat": { title: "Кулуарная дипломатия", setting: "в лабиринте власти, слухов и альянсов", tone: "интриги и высокого риска", icon: "snake" },
   "heart-lines": { title: "Линии сердца", setting: "в кварталах близости и сомнений", tone: "чувственной психологической арки", icon: "heart-outline" },
   "mirror-of-truth": { title: "Зеркало правды", setting: "в цитадели отражений", tone: "внутренней драмы и прозрения", icon: "mirror" },
 };
@@ -1937,6 +2179,36 @@ const campaignStoryArc: Record<CampaignId, { beats: [string, string, string, str
       "Развязка: ты возвращаешь себе голос и право выбирать.",
     ],
     finale: "Ты выходишь из зеркального коридора не сломанной, а собранной и ясной.",
+  },
+  gryffindor_common_room: {
+    beats: [
+      "В Гриффиндоре колкость звучит как проверка на храбрость.",
+      "Подколы становятся прямым давлением за право вести группу.",
+      "Перелом: тебя провоцируют сорваться публично.",
+      "Финальный рывок: лидерство решается в серии жестких диалогов.",
+      "Развязка: команда принимает либо твою рамку, либо хаос.",
+    ],
+    finale: "Ты завершаешь арку с сильной позицией: лидерство без токсичности.",
+  },
+  ravenclaw_common_room: {
+    beats: [
+      "В Когтевране тебя встречают холодными комментариями и проверкой логики.",
+      "Обострение: обесценивание прячут за рациональными формулами.",
+      "Перелом: спор идет уже не о фактах, а о праве на голос.",
+      "Финальный рывок: ты удерживаешь структуру под интеллектуальным нажимом.",
+      "Развязка: в группе фиксируется зрелый формат дискуссии.",
+    ],
+    finale: "Ты выходишь из арки с четкой речью, границами и уважением к фактам.",
+  },
+  hufflepuff_common_room: {
+    beats: [
+      "В Пуффендуе дружелюбие часто подменяет честный разговор.",
+      "Обострение: прямота воспринимается как угроза близости.",
+      "Перелом: тебя зовут «удобной», а не конструктивной.",
+      "Финальный рывок: нужно соединить эмпатию и ясную позицию.",
+      "Развязка: группа учится не избегать конфликт, а проживать его бережно.",
+    ],
+    finale: "Ты фиксируешь новый стандарт: мягко по тону, твердо по сути.",
   },
   "office-icebreaker": {
     beats: [
@@ -1996,6 +2268,9 @@ const opponentNameByCampaign: Record<CampaignId, string> = {
   slytherin: "Префект",
   boss: "Настя",
   narcissist: "Он",
+  gryffindor_common_room: "Капитан факультета",
+  ravenclaw_common_room: "Староста Когтеврана",
+  hufflepuff_common_room: "Староста Пуффендуя",
   "office-icebreaker": "Настя",
   "boundary-keeper": "Собеседник",
   "serpentine-diplomat": "Префект",
@@ -2143,6 +2418,110 @@ const endingNarrativeByRoute = (campaign: CampaignId): Record<EndingRouteId, str
   breakthrough: `Концовка «${endingRouteName.breakthrough}»: в кампании «${campaignLore[campaign].title}» ты останавливаешь токсичный сценарий и разворачиваешь игру в свою пользу без разрушения себя.`,
 });
 
+type EndingPerformanceTier = "angel" | "good" | "normal" | "bad" | "harsh";
+
+function detectEndingPerformanceTier(totalSteps: number, penalties: number, firstTrySuccessCount: number): EndingPerformanceTier {
+  const safeTotal = Math.max(1, totalSteps);
+  const firstTryRate = firstTrySuccessCount / safeTotal;
+  if (penalties === 0 && firstTryRate >= 0.92) {
+    return "angel";
+  }
+  if (penalties <= Math.max(1, Math.floor(safeTotal * 0.1)) && firstTryRate >= 0.72) {
+    return "good";
+  }
+  if (penalties >= Math.ceil(safeTotal * 0.45) || firstTryRate < 0.25) {
+    return "harsh";
+  }
+  if (penalties >= Math.ceil(safeTotal * 0.25) || firstTryRate < 0.5) {
+    return "bad";
+  }
+  return "normal";
+}
+
+function buildFinalStoryByOutcome(
+  campaign: CampaignId,
+  route: EndingRouteId,
+  tier: EndingPerformanceTier,
+  penalties: number,
+  overrideStory?: string
+) {
+  if (overrideStory) {
+    return overrideStory;
+  }
+  const campaignName = campaignLore[campaign].title;
+  const editorialEnding = editorialEndingByCampaignTier[campaign]?.[tier];
+  if (editorialEnding) {
+    const tierLabel: Record<EndingPerformanceTier, string> = {
+      angel: "ангел",
+      good: "хороший",
+      normal: "нормальный",
+      bad: "плохой",
+      harsh: "жесть",
+    };
+    return `Финал «${endingRouteName[route]}» — ${tierLabel[tier]}: ${editorialEnding}`;
+  }
+  const routeLine: Record<EndingRouteId, string> = {
+    order: "ты навела порядок в хаосе и вернула разговор к ясным договоренностям",
+    harmony: "ты сохранила контакт даже на высоком напряжении и не дала диалогу развалиться",
+    boundary: "ты удержала самоуважение и не позволила продавить себя через страх или стыд",
+    breakthrough: "ты развернула токсичный сценарий и перехватила инициативу без саморазрушения",
+  };
+  const endingTag = `Финал «${endingRouteName[route]}»`;
+  if (tier === "angel") {
+    return `${endingTag} — ангел: в кампании «${campaignName}» ${routeLine[route]}. Ты ведешь переговоры идеально: эскалация остановлена, последствия устойчиво положительные, а твой стиль становится новой нормой для всей команды.`;
+  }
+  if (tier === "good") {
+    return `${endingTag} — хороший: в кампании «${campaignName}» ${routeLine[route]}. В решающий момент тебя услышали, переговоры закончились рабочим соглашением, а последствия оказались устойчивыми: роли ясны, правила приняты, доверие выросло.`;
+  }
+  if (tier === "normal") {
+    return `${endingTag} — нормальный: в кампании «${campaignName}» ${routeLine[route]}, но местами не хватило точности. Итог переговоров рабочий, но хрупкий: конфликт снят частично, и команде нужен дополнительный раунд договоренностей.`;
+  }
+  if (tier === "bad") {
+    return `${endingTag} — плохой: в кампании «${campaignName}» ты несколько раз отдала инициативу, а штрафы подрезали темп. Переговоры закончились с потерями: контакт ослаб, договоренности шаткие, часть последствий перенеслась в следующий этап как новый конфликт.`;
+  }
+  return `${endingTag} — жесть: в кампании «${campaignName}» ты не удержала ритм под давлением — штрафов было ${penalties}, и оппоненты перехватили контроль ключевых эпизодов. Переговоры сорвались, последствия болезненные: разрыв, репутационный откат и необходимость собирать позицию заново.`;
+}
+
+function resolveExtendedEndingForNarrativeCampaign(
+  campaign: CampaignId,
+  tier: EndingPerformanceTier,
+  branchScore: Record<BranchId, number>,
+  answerBucketUsage: [number, number, number, number, number]
+): ExtendedNarrativeEndingId | null {
+  if (campaign !== "narcissist" && campaign !== "romance") {
+    return null;
+  }
+  const total = Math.max(1, answerBucketUsage.reduce((acc, value) => acc + value, 0));
+  const ratioA1A3 = (answerBucketUsage[0] + answerBucketUsage[2]) / total;
+  const ratioA5 = answerBucketUsage[4] / total;
+  const ratioA2 = answerBucketUsage[1] / total;
+  const topBranches = Object.entries(branchScore)
+    .sort((a, b) => b[1] - a[1])
+    .map(([branch]) => branch as BranchId);
+  const top1 = topBranches[0] ?? "strategist";
+  const top2 = topBranches[1] ?? "empath";
+
+  if (campaign === "narcissist") {
+    if (tier === "angel") return "narcissist_free_dawn";
+    if (tier === "good" && ratioA5 >= 0.34 && (top1 === "architect" || top2 === "architect")) return "narcissist_living_union";
+    if (tier === "good") return "narcissist_clear_contract";
+    if (tier === "normal" && ratioA5 >= 0.2) return "narcissist_pause_rebuild";
+    if (tier === "normal") return "narcissist_thin_ice";
+    if (tier === "bad" && ratioA1A3 >= 0.5) return "narcissist_golden_cage";
+    if (tier === "bad") return "narcissist_fog_relapse";
+    return "narcissist_burned_heart";
+  }
+
+  if (tier === "angel") return "romance_garden_of_two";
+  if (tier === "good" && ratioA5 >= 0.34) return "romance_quiet_harbor";
+  if (tier === "good") return "romance_gentle_goodbye";
+  if (tier === "normal" && ratioA2 >= 0.32) return "romance_fragile_bridge";
+  if (tier === "normal") return "romance_new_rhythm";
+  if (tier === "bad" && ratioA1A3 >= 0.5) return "romance_tired_together";
+  if (tier === "bad") return "romance_storm_loop";
+  return "romance_red_night";
+}
+
 const branchSceneLeadPool: Record<BranchId, string[]> = {
   strategist: [
     "Ты быстро собираешь разрозненные факты в понятный порядок.",
@@ -2186,73 +2565,1052 @@ function buildBranchSceneLead(branch: BranchId, idx: number, stageIdx: number) {
   return pool[(idx + stageIdx) % pool.length];
 }
 
-function buildOpponentReplica(campaign: CampaignId, dilemma: string, branch: BranchId) {
-  const name = opponentNameByCampaign[campaign];
-  const cleaned = dilemma.replace(/[«»"]/g, "").trim();
+function buildOpponentReplica(campaign: CampaignId, opponent: string, replica: string, branch: BranchId, idx: number, stageIdx: number) {
+  const cleaned = replica.replace(/[«»"]/g, "").trim();
+  const voice = opponentVoiceByCampaign[campaign];
+  const sharpener = voice.sharpeners[(idx + stageIdx) % voice.sharpeners.length];
+  const tone = voice.branchTone[branch];
   const branchLead: Record<BranchId, string> = {
-    strategist: `${name} переводит на тебя внимание:`,
-    empath: `${name} бросает сдержанно-колкий упрек:`,
-    boundary: `${name} давит и пытается продавить рамки:`,
-    challenger: `${name} идет в лобовую атаку:`,
-    architect: `${name} повторяет старый токсичный сценарий:`,
+    strategist: `${opponent} переводит на тебя внимание:`,
+    empath: `${opponent} бросает сдержанно-колкий упрек:`,
+    boundary: `${opponent} давит и пытается продавить рамки:`,
+    challenger: `${opponent} идет в лобовую атаку:`,
+    architect: `${opponent} повторяет старый токсичный сценарий:`,
   };
-  return `${branchLead[branch]} "${cleaned}"`;
+  return `${branchLead[branch]} (${tone}, ${sharpener}) "${cleaned}"`;
 }
 
-function buildLitRpgStepOptions(dilemma: string, idx: number, stageIdx: number) {
-  const toneIndex = (idx * 3 + stageIdx) % tacticalLinePool.strategist.length;
-  const pressureBranch: BranchId = idx % 2 === 0 ? "challenger" : "architect";
-  const tacticalBranches: BranchId[] = ["strategist", "empath", "boundary", pressureBranch];
-  const correctSingle = idx % tacticalBranches.length;
+function pickOpponentAvatar(opponentEmotion: string, replica: string, idx: number) {
+  const text = `${opponentEmotion} ${replica}`.toLowerCase();
+  if (text.includes("презр") || text.includes("усмех") || text.includes("насмеш")) return idx % 2 === 0 ? "😏" : "🙄";
+  if (text.includes("зл") || text.includes("вспых") || text.includes("шип")) return idx % 2 === 0 ? "😠" : "🤬";
+  if (text.includes("в упор") || text.includes("в лоб") || text.includes("дав")) return idx % 2 === 0 ? "🫵" : "👊";
+  if (text.includes("обиж") || text.includes("боль") || text.includes("уязв")) return idx % 2 === 0 ? "🥺" : "😤";
+  if (text.includes("скеп") || text.includes("щур") || text.includes("прищур")) return idx % 2 === 0 ? "🤨" : "🧐";
+  if (text.includes("улыб") || text.includes("мягк")) return idx % 2 === 0 ? "🙂" : "😼";
+  if (text.includes("устал") || text.includes("вздых")) return idx % 2 === 0 ? "😮‍💨" : "😒";
+  const fallback = ["😐", "😑", "🫤", "😶", "😬", "🙃", "🫠", "🤔"];
+  return fallback[idx % fallback.length];
+}
 
-  const options = [
-    tacticalLinePool.strategist[toneIndex],
-    tacticalLinePool.empath[toneIndex],
-    tacticalLinePool.boundary[toneIndex],
-    pressureBranch === "challenger" ? tacticalLinePool.challenger[toneIndex] : tacticalLinePool.architect[toneIndex],
-    tacticalLinePool.toxic[toneIndex],
-  ];
+const decisionPromptByCampaign: Record<CampaignId, [string[], string[], string[], string[], string[]]> = {
+  forest: [
+    [
+      "Как отвечаешь так, чтобы отряд услышал тебя с первого раза?",
+      "Что говоришь, чтобы не дать панике управлять группой?",
+      "Какой первый ход здесь удержит людей и маршрут?",
+      "Как берешь слово так, чтобы не усилить хаос?",
+      "Что говоришь, чтобы сохранить темп и доверие?",
+    ],
+    [
+      "Как реагируешь на давление, не сдавая управление сценой?",
+      "Что отвечаешь, когда тебя провоцируют на резкость?",
+      "Как переводишь наезд в рабочий разговор по делу?",
+      "Какой ход здесь соберет команду, а не разнесет ее?",
+      "Что говоришь, чтобы снять накал и двинуться дальше?",
+    ],
+    [
+      "Как меняешь сценарий конфликта в пользу команды?",
+      "Что отвечаешь, чтобы привычная перепалка не повторилась?",
+      "Какой репликой перехватываешь управление без унижения?",
+      "Как здесь защитить людей и не потерять дисциплину?",
+      "Что говоришь, чтобы группа приняла новую рамку?",
+    ],
+    [
+      "Как отвечаешь в критический момент, когда ставка максимальна?",
+      "Что говоришь, чтобы не сорваться в бой за эго?",
+      "Как держишь переговорный курс под открытым нажимом?",
+      "Какой ответ здесь принесет результат, а не красивый шум?",
+      "Как сохраняешь лидерство, когда тебя проверяют в лоб?",
+    ],
+    [
+      "Как закрываешь этот узел так, чтобы на следующем рейде было легче?",
+      "Что говоришь в финале, чтобы команда забрала рабочий стандарт?",
+      "Какой ответ закрепит твой зрелый стиль в конфликте?",
+      "Что выбираешь, чтобы из напряжения родилось правило, а не обида?",
+      "Как завершаешь сцену с ясностью, границами и уважением?",
+    ],
+  ],
+  romance: [
+    [
+      "Как отвечаешь так, чтобы сохранить тепло и не потерять себя?",
+      "Что говоришь, когда колкость маскируют под шутку?",
+      "Какой ход здесь защищает близость без самопредательства?",
+      "Как обозначаешь границу, не обрывая контакт?",
+      "Что отвечаешь, чтобы разговор остался взрослым?",
+    ],
+    [
+      "Как реагируешь на вину и давление без капитуляции?",
+      "Что говоришь, когда тебя толкают в роль 'вечно виноватой'?",
+      "Какой ответ тут снимает накал и возвращает уважение?",
+      "Как защищаешь свои границы, не переходя в нападение?",
+      "Что выбираешь, чтобы не дать конфликту уйти в токсичность?",
+    ],
+    [
+      "Как меняешь ритм диалога так, чтобы вас снова можно было услышать?",
+      "Что говоришь в момент, когда старый сценарий почти победил?",
+      "Какой ответ переведет спор из борьбы в договор?",
+      "Как защищаешь себя и не рвешь связь окончательно?",
+      "Что выбираешь, чтобы вернуть разговор в реальность, а не драму?",
+    ],
+    [
+      "Как отвечаешь на высоком градусе без ультиматумов и унижений?",
+      "Что говоришь, когда тебя толкают к резкому финалу?",
+      "Какой ход здесь работает на доверие в будущем, а не на победу в моменте?",
+      "Как удерживаешь тон, когда оппонент бьет по больному?",
+      "Что отвечаешь, чтобы не уступить давлению и не закрыться?",
+    ],
+    [
+      "Как закрываешь финальный разговор по-взрослому и ясно?",
+      "Что говоришь в точке выбора, чтобы сохранить достоинство обоих?",
+      "Какой ответ закрепит новый стиль вашей связи?",
+      "Что выбираешь, чтобы после сцены осталось уважение, а не пепел?",
+      "Как формулируешь финал: честно, тепло и с границами?",
+    ],
+  ],
+  slytherin: [
+    [
+      "Как отвечаешь, чтобы не потерять статус и не скатиться в дешёвую токсичность?",
+      "Что говоришь, когда тебя проверяют на вес в круге?",
+      "Какой ход здесь защитит позицию и правила одновременно?",
+      "Как держишь хладнокровие, когда тебя публично обесценивают?",
+      "Что отвечаешь, чтобы развернуть колкость в деловой формат?",
+    ],
+    [
+      "Как реагируешь на интригу так, чтобы не кормить её?",
+      "Что говоришь, когда на тебя давят через лояльность и намёки?",
+      "Какой ответ сохраняет влияние без подковёрной грязи?",
+      "Как держишь разговор в поле правил, а не слухов?",
+      "Что выбираешь, чтобы не уступить манипуляции?",
+    ],
+    [
+      "Как перехватываешь управление, когда тебя тянут в старую игру?",
+      "Что говоришь, чтобы обнулить личные выпады и вернуть критерии?",
+      "Какой ход укрепляет твою линию без войны за лица?",
+      "Как отвечаешь, когда формально всё 'вежливо', но токсично по сути?",
+      "Что выбираешь, чтобы закрепить честный контур решения?",
+    ],
+    [
+      "Как держишь темп эндшпиля и не теряешь достоинство?",
+      "Что отвечаешь в момент, где ставят на твою капитуляцию?",
+      "Какой ход здесь конвертирует давление в переговорное преимущество?",
+      "Как защищаешь команду и не сдаёшь позиции?",
+      "Что говоришь, чтобы закрыть раунд в свою пользу по правилам?",
+    ],
+    [
+      "Как формулируешь финал так, чтобы твоя линия стала новой нормой?",
+      "Что говоришь, когда от тебя ждут либо подчинения, либо скандала?",
+      "Какой ответ закрепит влияние без унижения других?",
+      "Что выбираешь, чтобы после партии осталась работающая система?",
+      "Как закрываешь сезон: хладнокровно, ясно и по-взрослому?",
+    ],
+  ],
+  boss: [
+    [
+      "Как отвечаешь начальнице так, чтобы не сжечь мост и не проглотить наезд?",
+      "Что говоришь, когда давление подают как 'деловой стиль'?",
+      "Какой ход здесь защитит результат и твоё достоинство?",
+      "Как обозначаешь рамку разговора в рабочем, а не личном поле?",
+      "Что отвечаешь, чтобы вернуть фокус на задачу и критерии?",
+    ],
+    [
+      "Как держишь позицию, когда тебя публично прожимают?",
+      "Что говоришь, если тебя пытаются ускорить через стыд и страх?",
+      "Какой ответ не даст конфликту перейти в личную расправу?",
+      "Как переводишь жёсткий тон в формат решения?",
+      "Что выбираешь, чтобы команда увидела в тебе опору, а не жертву?",
+    ],
+    [
+      "Как меняешь сценарий 'дожима' на сценарий 'управления'?",
+      "Что говоришь, когда от тебя ждут покорности вместо зрелости?",
+      "Какой ход закрепляет твоё лидерство без крика?",
+      "Как отвечаешь, чтобы признать риск и не сдать границы?",
+      "Что выбираешь, чтобы спор дал системе плюс, а не шрам?",
+    ],
+    [
+      "Как держишь удар в финальном давлении и не теряешь ясность?",
+      "Что говоришь, когда тебя подталкивают к небезопасному решению?",
+      "Какой ответ защищает команду и бизнес одновременно?",
+      "Как отвечаешь на ультиматум без оборонительной суеты?",
+      "Что выбираешь, чтобы выиграть не только сейчас, но и дальше?",
+    ],
+    [
+      "Как закрываешь цикл так, чтобы правила пережили следующий кризис?",
+      "Что говоришь в финале, чтобы закрепить новый стандарт общения?",
+      "Какой ответ превращает личный конфликт в командную практику?",
+      "Что выбираешь, чтобы после шторма осталось доверие к тебе как к лидеру?",
+      "Как завершаешь сцену: твёрдо, спокойно и профессионально?",
+    ],
+  ],
+  narcissist: [
+    [
+      "Как отвечаешь на сладкую манипуляцию, не теряя контакт с реальностью?",
+      "Что говоришь, когда вину подают как доказательство любви?",
+      "Какой ход здесь защитит твою автономию без истерики?",
+      "Как обозначаешь границы, когда тебя мягко подталкивают к уступке?",
+      "Что выбираешь, чтобы не перепутать заботу и контроль?",
+    ],
+    [
+      "Как реагируешь на эмоциональный шантаж без самообвинения?",
+      "Что говоришь, когда тебя ловят на страхе потерять отношения?",
+      "Какой ответ обрывает сценарий 'ты плохая, если не согласна'?",
+      "Как держишь спокойствие, когда давление становится личным?",
+      "Что выбираешь, чтобы сохранить себя в этой связке?",
+    ],
+    [
+      "Как отвечаешь на газлайтинг так, чтобы не раствориться в сомнениях?",
+      "Что говоришь, когда твою память и чувства объявляют 'фантазией'?",
+      "Какой ход тут защищает факты и твою психическую опору?",
+      "Как останавливаешь цикл обвинений и угроз?",
+      "Что выбираешь, чтобы вернуть себе голос и контроль?",
+    ],
+    [
+      "Как действуешь на этапе выхода, не вступая в торг с насилием?",
+      "Что говоришь, когда тебя снова затягивают в эмоциональную петлю?",
+      "Какой ответ сохраняет безопасность и ясные границы?",
+      "Как удерживаешь линию, когда тебя давят страхом одиночества?",
+      "Что выбираешь, чтобы окончательно разорвать токсичный ритм?",
+    ],
+    [
+      "Как закрываешь финал так, чтобы больше не открывать дверь манипуляции?",
+      "Что говоришь в последнем разговоре, когда на тебя давят ностальгией и угрозой?",
+      "Какой ответ закрепит твою опору на себя и поддержку?",
+      "Что выбираешь, чтобы после разрыва осталась ясность, а не вина?",
+      "Как формулируешь точку: спокойно, твёрдо и окончательно?",
+    ],
+  ],
+  "office-icebreaker": [
+    [
+      "Как отвечаешь на мостике, чтобы команда не распалась на лагеря?",
+      "Что говоришь, когда бриф превращают в насмешку?",
+      "Какой первый ход здесь вернет разговор в рабочий контур?",
+      "Как удерживаешь дисциплину без силового давления?",
+      "Что выбираешь, чтобы шторм не съел управление?",
+    ],
+    [
+      "Как реагируешь на резкость в разгаре кризиса, не теряя темпа?",
+      "Что говоришь, когда тебя провоцируют на эмоциональный срыв?",
+      "Какой ответ здесь собирает смену вокруг решения?",
+      "Как переводишь хаос в короткие понятные шаги?",
+      "Что выбираешь, чтобы сохранить команду и дедлайн?",
+    ],
+    [
+      "Как берёшь штурвал разговора без борьбы за самолюбие?",
+      "Что говоришь, когда твой план пытаются обнулить колкостью?",
+      "Какой ход закрепит новую рабочую рамку для всех?",
+      "Как отвечаешь, чтобы действия последовали сразу?",
+      "Что выбираешь, чтобы кризис стал поворотом в зрелость команды?",
+    ],
+    [
+      "Как держишь курс в финальной турбулентности и не сдаешь стандарты?",
+      "Что говоришь, когда от тебя ждут 'быстро и любой ценой'?",
+      "Какой ответ здесь защищает систему от дорогой ошибки?",
+      "Как отвечаешь на проверку лидерства в прямом эфире?",
+      "Что выбираешь, чтобы остаться опорой под давлением?",
+    ],
+    [
+      "Как закрываешь рейс так, чтобы договоренности прожили следующий шторм?",
+      "Что говоришь в финале, когда нужно закрепить новый переговорный код?",
+      "Какой ответ превращает разовый успех в рабочий стандарт?",
+      "Что выбираешь, чтобы команда унесла из кризиса зрелый навык?",
+      "Как формулируешь итог: ясно, твердо и без героической позы?",
+    ],
+  ],
+  "boundary-keeper": [
+    [
+      "Как отвечаешь, чтобы сказать 'нет' без войны и без сдачи себя?",
+      "Что говоришь, когда тебя давят виной за твои границы?",
+      "Какой ход здесь удержит уважение в обе стороны?",
+      "Как обозначаешь рамку спокойно и недвусмысленно?",
+      "Что выбираешь, чтобы сохранить контакт и самоуважение?",
+    ],
+    [
+      "Как реагируешь на стыд и сарказм, не объясняясь лишнего?",
+      "Что говоришь, когда отказ пытаются назвать эгоизмом?",
+      "Какой ответ переводит давление в взрослый формат договора?",
+      "Как защищаешь свое время и энергию без нападения?",
+      "Что выбираешь, чтобы граница осталась, а связь не сгорела?",
+    ],
+    [
+      "Как укрепляешь новую линию поведения, когда ее проверяют на прочность?",
+      "Что говоришь, когда старый сценарий 'уступи' снова запускается?",
+      "Какой ход здесь делает твой отказ понятным и устойчивым?",
+      "Как отвечаешь, чтобы не скатиться ни в агрессию, ни в уступку?",
+      "Что выбираешь, чтобы говорить прямо и экологично?",
+    ],
+    [
+      "Как держишь границы под максимальным эмоциональным нажимом?",
+      "Что говоришь, когда тебя атакуют через близость и долг?",
+      "Какой ответ здесь защищает тебя и не разрушает диалог?",
+      "Как отвечаешь, когда тебя тянут обратно в привычную роль?",
+      "Что выбираешь, чтобы не предать себя в горячем моменте?",
+    ],
+    [
+      "Как закрываешь арку так, чтобы твои границы стали нормой, а не исключением?",
+      "Что говоришь в финале, чтобы договоренности были реальными?",
+      "Какой ответ закрепит уважительный формат на будущее?",
+      "Что выбираешь, чтобы остаться теплой и твердой одновременно?",
+      "Как формулируешь итог: коротко, ясно и по-взрослому?",
+    ],
+  ],
+  "serpentine-diplomat": [
+    [
+      "Как отвечаешь в первой интриге так, чтобы не стать легкой добычей?",
+      "Что говоришь, когда тебя снижают до 'не имеющей веса'?",
+      "Какой ход здесь закрепляет позицию без театральной резкости?",
+      "Как удерживаешь разговор в поле правил и влияния?",
+      "Что выбираешь, чтобы остаться хладнокровной и точной?",
+    ],
+    [
+      "Как реагируешь на политическое давление без уступки принципам?",
+      "Что говоришь, когда лояльность используют как рычаг подчинения?",
+      "Какой ответ сохранит влияние и не втянет в грязную игру?",
+      "Как возвращаешь разговор к прозрачным условиям?",
+      "Что выбираешь, чтобы не стать частью манипулятивной схемы?",
+    ],
+    [
+      "Как меняешь правила игры, когда тебя пытаются загнать в старую роль?",
+      "Что говоришь, когда 'вежливость' прикрывает токсичную атаку?",
+      "Какой ход здесь превращает интригу в управляемый процесс?",
+      "Как отвечаешь так, чтобы круг признал новую рамку?",
+      "Что выбираешь, чтобы усилить систему, а не чей-то эго-контур?",
+    ],
+    [
+      "Как выдерживаешь эндшпиль, когда давление идет одновременно с двух сторон?",
+      "Что говоришь, когда тебя толкают к молчаливому согласию?",
+      "Какой ответ здесь принесет власть через правила, а не страх?",
+      "Как защищаешь команду и не проигрываешь стол переговоров?",
+      "Что выбираешь, чтобы закрыть раунд в стратегический плюс?",
+    ],
+    [
+      "Как завершаешь партию так, чтобы твой стиль стал нормой круга?",
+      "Что говоришь в финале, когда тебя проверяют на последовательность?",
+      "Какой ответ закрепляет влияние без унижения и давления?",
+      "Что выбираешь, чтобы в следующем цикле играть по новым правилам?",
+      "Как формулируешь итог: холодно, ясно и конструктивно?",
+    ],
+  ],
+  "heart-lines": [
+    [
+      "Как отвечаешь, чтобы остаться в близости и не раствориться в ней?",
+      "Что говоришь, когда ранят под видом шутки или заботы?",
+      "Какой ход здесь сохраняет контакт и твои границы?",
+      "Как обозначаешь потребность без упрека и стыда?",
+      "Что выбираешь, чтобы диалог остался живым и взрослым?",
+    ],
+    [
+      "Как реагируешь на накопленные обиды, не включая старую защиту?",
+      "Что говоришь, когда тебя пытаются вернуть в роль 'вечно виноватой'?",
+      "Какой ответ снимет накал и вернет взаимное уважение?",
+      "Как удерживаешь разговор в формате 'мы против проблемы'?",
+      "Что выбираешь, чтобы не уйти в сарказм и молчаливую месть?",
+    ],
+    [
+      "Как перезапускаешь язык пары в момент перелома?",
+      "Что говоришь, когда вас тянет в привычную ссору по кругу?",
+      "Какой ход поможет услышать друг друга, а не победить друг друга?",
+      "Как отвечаешь, чтобы уязвимость не превратилась в оружие?",
+      "Что выбираешь, чтобы связь стала зрелее после конфликта?",
+    ],
+    [
+      "Как держишь рамку уважения на высоком градусе эмоций?",
+      "Что говоришь, когда тебя провоцируют на резкий финал?",
+      "Какой ответ здесь сохранит достоинство обоих?",
+      "Как отвечаешь, чтобы не уйти в холод и не взорваться?",
+      "Что выбираешь, чтобы пройти сложный разговор без разрушения?",
+    ],
+    [
+      "Как закрываешь этот этап так, чтобы близость стала безопаснее?",
+      "Что говоришь в финале, чтобы договоренности были живыми, а не формальными?",
+      "Какой ответ закрепит уважение как базовую норму?",
+      "Что выбираешь, чтобы следующий конфликт проходить взрослее?",
+      "Как формулируешь итог: тепло, ясно и с опорой на себя?",
+    ],
+  ],
+  "mirror-of-truth": [
+    [
+      "Как отвечаешь, когда тебя проверяют на прочность через сомнение и обесценивание?",
+      "Что говоришь, чтобы не уступить давлению и не уйти в защиту?",
+      "Какой ход здесь сохранит ясность и самоуважение?",
+      "Как обозначаешь границы в поле формальной власти?",
+      "Что выбираешь, чтобы говорить из опоры, а не из страха?",
+    ],
+    [
+      "Как реагируешь, когда твою позицию пробуют стыдом и ярлыками?",
+      "Что говоришь, если на тебя давят 'реальностью рынка' вместо аргументов?",
+      "Какой ответ переводит разговор в деловой и честный контур?",
+      "Как удерживаешь зрелый тон, когда тебя провоцируют?",
+      "Что выбираешь, чтобы не предать свои принципы под нажимом?",
+    ],
+    [
+      "Как собираешь внутренний стержень и внешнюю структуру разговора?",
+      "Что говоришь, когда старый паттерн почти снова включился?",
+      "Какой ход закрепляет новый формат общения в команде?",
+      "Как отвечаешь, чтобы признать ошибку и не потерять позицию?",
+      "Что выбираешь, чтобы конфликт стал точкой роста, а не отката?",
+    ],
+    [
+      "Как держишь линию в финальной проверке под открытым давлением?",
+      "Что говоришь, когда тебя толкают в поспешное решение?",
+      "Какой ответ тут защищает и результат, и твою психологическую опору?",
+      "Как отвечаешь, чтобы не сгореть в чужом темпе и тоне?",
+      "Что выбираешь, чтобы пройти эту сцену без самоотмены?",
+    ],
+    [
+      "Как закрываешь арку так, чтобы новый стиль стал твоей нормой?",
+      "Что говоришь в финале, когда от тебя ждут подтверждения делом?",
+      "Какой ответ закрепит ясность, границы и ответственность?",
+      "Что выбираешь, чтобы не откатиться в старые защиты завтра?",
+      "Как формулируешь итог: спокойно, точно и по-взрослому?",
+    ],
+  ],
+  gryffindor_common_room: stageQuestionLeadByStage,
+  ravenclaw_common_room: stageQuestionLeadByStage,
+  hufflepuff_common_room: stageQuestionLeadByStage,
+};
 
-  const branchEffects: Record<number, BranchId> = {
-    0: tacticalBranches[0],
-    1: tacticalBranches[1],
-    2: tacticalBranches[2],
-    3: tacticalBranches[3],
+type TacticalPool = {
+  strategist: string[];
+  empath: string[];
+  boundary: string[];
+  challenger: string[];
+  architect: string[];
+  toxic: string[];
+};
+
+const campaignTacticalPool: Record<CampaignId, TacticalPool> = {
+  forest: {
+    strategist: ["«Разворачиваем карту и режем маршрут по рискам.»", "«Сначала безопасный коридор, потом скорость.»", "«Фиксируем роли на этот отрезок и идём.»"],
+    empath: ["«Слышу, что всех трясет. Стабилизируемся и двигаемся.»", "«Давайте без взаимных укусов, нам ещё выходить живыми.»", "«Признаю напряжение. Теперь — один общий шаг.»"],
+    boundary: ["«На личности не идём. Говорим по маршруту.»", "«Я готова спорить по плану, не по достоинству.»", "«Стоп наезд. Возвращаемся к задаче.»"],
+    challenger: ["«Если твой вариант лучше — выкладывай критерии сейчас.»", "«Давление не проводит отряд через шторм.»", "«Громче не значит точнее. Давай по фактам.»"],
+    architect: ["«После выхода закрепим правило смены решений.»", "«Нам нужен протокол, а не очередная импровизация.»", "«Сделаем систему, чтобы завтра не повторить этот бардак.»"],
+    toxic: ["«Еще слово — и пойдешь одна.»", "«Ты тут балласт, а не помощь.»", "«Молчи и делай, пока не стало хуже.»"],
+  },
+  romance: {
+    strategist: ["«Давай четко: что случилось, что нужно, что делаем дальше?»", "«Не угадываем, проговариваем прямо.»", "«Соберем разговор в три пункта без уколов.»"],
+    empath: ["«Слышу, что тебе больно, и я в разговоре.»", "«Я не обесцениваю твои чувства, давай без ударов.»", "«Хочу сохранить нас, а не выиграть спор.»"],
+    boundary: ["«Такой тон мне не подходит, я продолжу при уважении.»", "«Я не согласна на шантаж в отношениях.»", "«Давай говорить честно, но без унижения.»"],
+    challenger: ["«Если это претензия — скажи её прямо, без крючков.»", "«Провокации не доказывают любовь.»", "«Ультиматумом доверие не строят.»"],
+    architect: ["«Нам нужен формат ссоры, после которого мы не разваливаемся.»", "«Договоримся о правилах, чтобы не повторять одно и то же.»", "«Закрепим ритуал восстановления после конфликта.»"],
+    toxic: ["«Хватит драмы, ты опять всё раздуваешь.»", "«Мне проще молчать, чем слушать это.»", "«Делай как хочешь, мне уже всё равно.»"],
+  },
+  slytherin: {
+    strategist: ["«Снимаем дым и считаем реальные рычаги влияния.»", "«Критерии на стол, остальное — театр.»", "«Фиксируем условия сделки до аплодисментов.»"],
+    empath: ["«Слышу твой укол. Давай в позицию, не в яд.»", "«Ок, напряжение есть, но нам нужно решение круга.»", "«Сохраним лицо всем и не потеряем смысл.»"],
+    boundary: ["«Личные выпады заканчиваем, обсуждаем решение.»", "«Статусом не давим — аргументами убеждаем.»", "«В этой комнате я на унижение не подписываюсь.»"],
+    challenger: ["«Проверка на прочность принята: где твои факты?»", "«Хочешь игры — играем по правилам, не по намекам.»", "«Интрига без результата — просто шум.»"],
+    architect: ["«Запишем правило, чтобы круг не жил слухами.»", "«Соберем механизм апелляции, иначе будет вечная вендетта.»", "«Нужна система влияния, а не культ громких фамилий.»"],
+    toxic: ["«Знай своё место и не лезь выше круга.»", "«С тобой говорят из вежливости, не путай это с весом.»", "«Тебя держат рядом только пока ты удобна.»"],
+  },
+  boss: {
+    strategist: ["«Фиксирую: цель, срок, риск, владелец.»", "«Собираем решение, которое выдержит проверку, а не только дедлайн.»", "«Разложим задачу на этапы и уберем хаос.»"],
+    empath: ["«Слышу давление, но нам нужен рабочий диалог.»", "«Понимаю градус. Давайте без взаимного уничтожения.»", "«Я в контакте, и я за результат команды.»"],
+    boundary: ["«В таком тоне я не продолжаю, вернемся к сути.»", "«Критику принимаю, личные удары — нет.»", "«Готова обсуждать жестко по задаче, не по личности.»"],
+    challenger: ["«Если это ультиматум — давайте сразу фиксировать риски.»", "«Давление не заменяет управленческое решение.»", "«Аргументы в цифрах, не в громкости.»"],
+    architect: ["«После инцидента закрепим регламент эскалации.»", "«Системно закроем дыру, а не только сегодняшний пожар.»", "«Нужны правила, которые переживут следующий кризис.»"],
+    toxic: ["«Если не тянешь темп — освободи место.»", "«Я не нянька, делай как сказано.»", "«Хватит тормозить отдел своим комфортом.»"],
+  },
+  narcissist: {
+    strategist: ["«Соберем факты и не дадим разговору расползтись.»", "«Я говорю по событию, не по внушённой вине.»", "«Разделим эмоции и манипуляции по пунктам.»"],
+    empath: ["«Я вижу напряжение, но не согласна на давление.»", "«Мне важен контакт, но не ценой самоуничтожения.»", "«Слышу тебя и остаюсь в своих границах.»"],
+    boundary: ["«Это моя граница, и она не обсуждается в таком тоне.»", "«Шантажом близость не строится.»", "«Я не соглашаюсь на контроль под видом любви.»"],
+    challenger: ["«Если это угроза — на этом разговор заканчивается.»", "«Подмена фактов не сработает, я это вижу.»", "«Давление не изменит моего решения.»"],
+    architect: ["«Дальше только письменные договоренности и ясный формат.»", "«Я собираю безопасный контур общения, без качелей.»", "«Нам нужны правила контакта, иначе его не будет.»"],
+    toxic: ["«Ты токсичен, и мне плевать на твои чувства.»", "«Еще раз напишешь — заблокирую и забуду.»", "«С тобой невозможно говорить как с человеком.»"],
+  },
+  "office-icebreaker": {
+    strategist: ["«Фиксируем контур аварии и первый пакет действий.»", "«Собираем приоритеты: что критично в ближайшие 20 минут.»", "«Убираем шум и запускаем рабочий протокол.»"],
+    empath: ["«Команда на пределе, держим тон и ясность.»", "«Снимаем взаимные уколы, нам нужен общий ритм.»", "«Слышу напряжение, возвращаю всех в задачу.»"],
+    boundary: ["«На личности не выходим — эфир рабочий.»", "«Крик не ускоряет, только ломает команду.»", "«Продолжим в конструктиве, иначе пауза.»"],
+    challenger: ["«Если решение сильное — покажи цифры и риск.»", "«Ультиматум не заменяет управления кризисом.»", "«Давлением шторма не пройти, нужна логика.»"],
+    architect: ["«После смены фиксируем регламент, чтобы не тушить это снова.»", "«Строим систему ночных эскалаций без хаоса.»", "«Нам нужен повторяемый стандарт, не разовый героизм.»"],
+    toxic: ["«Кто не вывозит — в сторону от мостика.»", "«Сейчас не время для слабых и сомневающихся.»", "«Либо исполняешь, либо мешаешь.»"],
+  },
+  "boundary-keeper": {
+    strategist: ["«Фиксирую: что я могу, что не могу, и в каком формате.»", "«Договоримся о границах заранее, без экстренных наездов.»", "«Разложим ожидания и уберем двусмысленность.»"],
+    empath: ["«Слышу, что тебе важно, и мне важно тоже.»", "«Я не отвергаю тебя, я обозначаю рамку.»", "«Хочу контакт, но в уважительном формате.»"],
+    boundary: ["«Нет — это мой ответ, и он не требует наказания.»", "«Я не продолжаю диалог в тоне давления.»", "«Готова обсуждать, не готова терпеть наезд.»"],
+    challenger: ["«Если это попытка продавить виной, я её не принимаю.»", "«Манипуляция замечена, возвращаемся к сути.»", "«Давить можно на дверь, не на мое решение.»"],
+    architect: ["«Закрепим новый формат, чтобы не спорить об этом каждый раз.»", "«Сделаем правила контакта, понятные обеим сторонам.»", "«Нам нужна система границ, а не настроенческий режим.»"],
+    toxic: ["«Отстань уже со своими требованиями.»", "«Ты вечно ноешь, а я должна терпеть.»", "«Если не нравится — дверь там.»"],
+  },
+  "serpentine-diplomat": {
+    strategist: ["«Собираю расклад сил и критерии сделки.»", "«Уберем дым и оставим предмет переговоров.»", "«Фиксируем выгоду, риск и цену шага.»"],
+    empath: ["«Слышу яд в тоне, но беру разговор в конструктив.»", "«Сохраним лицо всем и перейдем к сути.»", "«Я в диалоге, не в театре колкостей.»"],
+    boundary: ["«Личный выпад не принимаю, возвращаемся к решению.»", "«Статус не аргумент, если нет фактов.»", "«С таким тоном договор не подписывается.»"],
+    challenger: ["«Хотите давления — получите проверку на факты.»", "«Интрига красивая, но где рабочий результат?»", "«Если это угроза, фиксируем ее официально.»"],
+    architect: ["«Нужен протокол влияния, а не кулуарная рулетка.»", "«Соберем систему апелляций и ответственности.»", "«Строим правила круга, которые переживут личные войны.»"],
+    toxic: ["«Ты в политике никто, просто прими это.»", "«Тебя используют, пока ты удобна, не льсти себе.»", "«С таким весом тебе лучше молчать и наблюдать.»"],
+  },
+  "heart-lines": {
+    strategist: ["«Давай по шагам: факт, чувство, просьба, действие.»", "«Собираю разговор в ясный формат, чтобы не сорваться.»", "«Разделим ситуацию и обиду, чтобы услышать друг друга.»"],
+    empath: ["«Слышу твою боль и не обесцениваю ее.»", "«Мне важны мы оба, не только победа в споре.»", "«Давай бережно, но честно.»"],
+    boundary: ["«Я не принимаю этот тон, вернемся в уважение.»", "«Сарказм — не способ говорить со мной.»", "«Я в диалоге, но без унижения.»"],
+    challenger: ["«Если есть претензия — скажи ее прямо.»", "«Провокацией близость не проверяют.»", "«Ультиматум — это тупик, не разговор.»"],
+    architect: ["«Нам нужен ритуал восстановления после ссор.»", "«Договоримся о правилах конфликта на будущее.»", "«Соберем формат, который выдержит горячие моменты.»"],
+    toxic: ["«Ты всегда всё портишь своими драмами.»", "«С тобой невозможно нормально жить.»", "«Мне проще молчать, чем снова это слушать.»"],
+  },
+  "mirror-of-truth": {
+    strategist: ["«Проверяю факты, риски и точку решения.»", "«Соберу рамку, в которой мы не тонем в эмоциях.»", "«Перевожу давление в конкретный план действий.»"],
+    empath: ["«Вижу напряжение и не ухожу из разговора.»", "«Признаю эмоцию, но не отдаю ей управление.»", "«Сохраним человечность и ясность одновременно.»"],
+    boundary: ["«Личные ярлыки не принимаю, говорим по задаче.»", "«В таком тоне я не продолжаю.»", "«Готова к прямоте, не готова к унижению.»"],
+    challenger: ["«Если это давление — я его фиксирую и останавливаю.»", "«Провокация не заменяет аргументацию.»", "«Давайте без силовых игр: факты на стол.»"],
+    architect: ["«Нужен устойчивый формат сложных разговоров.»", "«Соберем систему, чтобы не повторять этот сценарий.»", "«Закрепим правила обратной связи и эскалации.»"],
+    toxic: ["«Хватит давить, ты просто токсичный лидер.»", "«С тобой диалог невозможен, только хаос.»", "«Разговор окончен, мне надоело тебя терпеть.»"],
+  },
+  gryffindor_common_room: {
+    strategist: ["«Я сделала шаг назад и собрала правила разговора по пунктам.»", "«Я сказала коротко: цель, риск, действие.»", "«Я собрала команду вокруг общего результата, а не личных уколов.»"],
+    empath: ["«Я сказала, что слышу раздражение, и предложила говорить по сути.»", "«Я сделала паузу, чтобы градус упал, и вернула разговор к задаче.»", "«Я собрала контакт: признаем эмоцию и идем к решению.»"],
+    boundary: ["«Я сказала: на личности не переходим, обсуждаем решение.»", "«Я сделала границу: спор по делу, без унижения.»", "«Я собрала формат диалога и остановила наезд.»"],
+    challenger: ["«Я сказала: если есть аргумент, выкладывай его прямо сейчас.»", "«Я сделала встречный вопрос и сняла давление статуса.»", "«Я собрала факты и отказалась играть в публичный разнос.»"],
+    architect: ["«Я сказала, что после сцены фиксируем правило для всей команды.»", "«Я сделала из конфликта протокол, а не драку за лидерство.»", "«Я собрала механизм, чтобы этот хаос не повторился.»"],
+    toxic: ["«Замолчи и не мешай, пока взрослые решают.»", "«Твоё мнение тут никто не ждал.»", "«Сейчас я тебя быстро поставлю на место.»"],
+  },
+  ravenclaw_common_room: {
+    strategist: ["«Я сделала структуру аргумента: тезис, факт, вывод.»", "«Я сказала, по каким критериям сравниваем решения.»", "«Я собрала проверяемые данные и убрала шум.»"],
+    empath: ["«Я сказала, что понимаю напряжение, и вернула формат диалога.»", "«Я сделала мягкий вход и попросила обсуждать идею, не человека.»", "«Я собрала разговор без обесценивания и защиты.»"],
+    boundary: ["«Я сказала: интеллектуальный тон не дает права на унижение.»", "«Я сделала границу: критикуем позицию, не личность.»", "«Я собрала рамку уважения и оставила место фактам.»"],
+    challenger: ["«Я сказала: рационализация не заменяет доказательство.»", "«Я сделала разворот: покажи источник и метод, а не авторитет.»", "«Я собрала уязвимые места аргумента без личной атаки.»"],
+    architect: ["«Я сказала, что нам нужен единый стандарт дискуссии.»", "«Я сделала шаблон: тезис, данные, решение, ответственность.»", "«Я собрала процесс, в котором нельзя давить превосходством.»"],
+    toxic: ["«Твои мысли слишком примитивны для этой комнаты.»", "«Сначала научись думать, потом говори.»", "«С тобой спорить — терять интеллект и время.»"],
+  },
+  hufflepuff_common_room: {
+    strategist: ["«Я сделала разговор ясным: что случилось и что делаем.»", "«Я сказала, что доброта не отменяет конкретику.»", "«Я собрала безопасный план без размытия ответственности.»"],
+    empath: ["«Я сказала мягко: мне важны вы, и мне важна честность.»", "«Я сделала шаг к контакту и попросила не уходить от сути.»", "«Я собрала тон бережный, но прямой.»"],
+    boundary: ["«Я сказала: удобство не важнее уважения к границам.»", "«Я сделала рамку: можно быть добрыми и при этом честными.»", "«Я собрала границу без стыда и обвинений.»"],
+    challenger: ["«Я сказала: избегание сейчас создаст большую боль позже.»", "«Я сделала разворот из “не обидеть” в “решить по-взрослому”.»", "«Я собрала смелый вопрос, который нельзя замолчать.»"],
+    architect: ["«Я сказала, что группе нужен ритуал сложных разговоров.»", "«Я сделала правило: факты сначала, эмоции рядом, не вместо.»", "«Я собрала систему бережной обратной связи.»"],
+    toxic: ["«Хватит ныть про чувства, это никому не интересно.»", "«Если вам больно от фактов — это не моя проблема.»", "«С вами только жестко, иначе вы ничего не понимаете.»"],
+  },
+};
+
+const campaignSeed: Record<CampaignId, number> = {
+  forest: 2,
+  romance: 5,
+  slytherin: 7,
+  boss: 11,
+  narcissist: 13,
+  gryffindor_common_room: 37,
+  ravenclaw_common_room: 41,
+  hufflepuff_common_room: 43,
+  "office-icebreaker": 17,
+  "boundary-keeper": 19,
+  "serpentine-diplomat": 23,
+  "heart-lines": 29,
+  "mirror-of-truth": 31,
+};
+
+const campaignRhythmProfile: Record<CampaignId, [number, number, number, number, number]> = {
+  forest: [5, 6, 5, 5, 4],
+  romance: [4, 5, 6, 5, 5],
+  slytherin: [6, 5, 5, 4, 5],
+  boss: [5, 5, 4, 6, 5],
+  narcissist: [4, 4, 7, 5, 5],
+  gryffindor_common_room: [1, 1, 1, 1, 1],
+  ravenclaw_common_room: [1, 1, 1, 1, 1],
+  hufflepuff_common_room: [1, 1, 1, 1, 1],
+  "office-icebreaker": [5, 6, 4, 6, 4],
+  "boundary-keeper": [6, 5, 5, 4, 5],
+  "serpentine-diplomat": [5, 5, 6, 4, 5],
+  "heart-lines": [5, 4, 6, 5, 5],
+  "mirror-of-truth": [5, 5, 5, 6, 4],
+};
+
+const opponentVoiceByCampaign: Record<CampaignId, { sharpeners: string[]; branchTone: Record<BranchId, string> }> = {
+  forest: { sharpeners: ["через зубы", "на повышенном", "с ледяной усмешкой"], branchTone: { strategist: "сухо", empath: "резко", boundary: "жестко", challenger: "в лоб", architect: "с подтекстом угрозы" } },
+  romance: { sharpeners: ["с больным сарказмом", "в тихом нажиме", "с упрямой обидой"], branchTone: { strategist: "с контролем", empath: "на нервах", boundary: "с обидой", challenger: "с ревнивым нажимом", architect: "с попыткой вернуть контроль" } },
+  slytherin: { sharpeners: ["с холодной иронией", "ядовито-вежливо", "с демонстративным превосходством"], branchTone: { strategist: "протокольно", empath: "колко", boundary: "давяще", challenger: "провокационно", architect: "политически расчетливо" } },
+  boss: { sharpeners: ["с корпоративным презрением", "в режиме дожима", "с демонстративной властностью"], branchTone: { strategist: "управленчески", empath: "сдержанно-жестко", boundary: "административно", challenger: "ультимативно", architect: "через системный нажим" } },
+  narcissist: { sharpeners: ["с липкой лаской", "через вину", "с ледяной мягкостью"], branchTone: { strategist: "скользко", empath: "манипулятивно", boundary: "с обесцениванием", challenger: "угрожающе", architect: "контролирующе" } },
+  gryffindor_common_room: { sharpeners: ["публично, на эмоции", "с подколом", "в лоб, на статус"], branchTone: { strategist: "коротко и жестко", empath: "колко", boundary: "с нажимом", challenger: "агрессивно", architect: "через требование силы" } },
+  ravenclaw_common_room: { sharpeners: ["с холодной логикой", "иронично-аналитично", "с демонстрацией превосходства"], branchTone: { strategist: "структурно", empath: "сдержанно", boundary: "формально-давяще", challenger: "доказательно-остро", architect: "протокольно" } },
+  hufflepuff_common_room: { sharpeners: ["вежливо-обесценивающе", "мягко через вину", "с уклонением от сути"], branchTone: { strategist: "тихо-сдержанно", empath: "уязвимо", boundary: "завуалированно давяще", challenger: "пассивно-агрессивно", architect: "через избегание" } },
+  "office-icebreaker": { sharpeners: ["в аварийном тоне", "по-боевому", "на пределе терпения"], branchTone: { strategist: "жестко-практично", empath: "нервно", boundary: "безапелляционно", challenger: "в атаке", architect: "через требование дисциплины" } },
+  "boundary-keeper": { sharpeners: ["с бытовым давлением", "через стыд", "в тоне обесценивания"], branchTone: { strategist: "с претензией", empath: "обиженно", boundary: "жестко", challenger: "продавливающе", architect: "через привычный контроль" } },
+  "serpentine-diplomat": { sharpeners: ["с политической насмешкой", "с ядом в улыбке", "с холодным расчетом"], branchTone: { strategist: "формально", empath: "колюще", boundary: "статусно", challenger: "агрессивно-интригующе", architect: "системно-давяще" } },
+  "heart-lines": { sharpeners: ["с уязвимой резкостью", "через колкость", "в накопленной обиде"], branchTone: { strategist: "сдержанно", empath: "чувствительно", boundary: "с нажимом", challenger: "эмоционально", architect: "с ожиданием контроля" } },
+  "mirror-of-truth": { sharpeners: ["с экспертным высокомерием", "в давящем спокойствии", "через холодный скепсис"], branchTone: { strategist: "аналитично", empath: "сухо", boundary: "властно", challenger: "провокационно", architect: "системно-угрожаще" } },
+};
+
+function inferBestBranchByHint(hint: string, stageIdx: number, idx: number): BranchId {
+  const lowered = hint.toLowerCase();
+  if (lowered.includes("границ") || lowered.includes("рамк") || lowered.includes("неприемлем")) return "boundary";
+  if (lowered.includes("эмпат") || lowered.includes("эмоц") || lowered.includes("слы") || lowered.includes("контакт")) return "empath";
+  if (lowered.includes("правил") || lowered.includes("протокол") || lowered.includes("систем")) return "architect";
+  if (lowered.includes("манипул") || lowered.includes("ультимат") || lowered.includes("вызов") || lowered.includes("прям")) return "challenger";
+  if (lowered.includes("факт") || lowered.includes("структур") || lowered.includes("приоритет") || lowered.includes("план")) return "strategist";
+  const fallbackByStage: BranchId[] = ["strategist", "empath", "boundary", "challenger", "architect"];
+  return fallbackByStage[(stageIdx + idx) % fallbackByStage.length];
+}
+
+const globalOptionKeysRegistry = new Set<string>();
+
+function toShortPlayerLine(text: string, maxWords = 12) {
+  const cleaned = text
+    .replace(/[«»"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = cleaned.split(" ").filter(Boolean);
+  if (words.length <= maxWords) {
+    return cleaned;
+  }
+  const chunks = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const firstChunk = chunks[0]?.trim();
+  if (firstChunk) {
+    const firstChunkWords = firstChunk.split(" ").filter(Boolean).length;
+    if (firstChunkWords >= 6 && firstChunkWords <= maxWords + 2) {
+      return firstChunk;
+    }
+  }
+  return words.slice(0, maxWords).join(" ").trim();
+}
+
+function buildCampaignNpcReactionPreset(campaign: CampaignId, npcBase: string): Record<number, string> {
+  const genericPreset: Record<number, string> = {
+    0: `${npcBase} резко усиливает давление: «Ты уводишь сцену в конфликт ради конфликта».`,
+    1: `${npcBase} холодно кивает: «Почти по делу, но в ответе все еще спрятан укол».`,
+    2: `${npcBase} перехватывает управление: «Так ты только отдаешь мне весь контроль».`,
+    3: `${npcBase} сбавляет напор: «Наконец-то рабочий ответ. Двигаемся».`,
+    4: `${npcBase} делает паузу и меняет тон: «Это сильный системный ход. Продолжай».`,
   };
 
-  return { options, correctSingle, branchEffects };
+  const presetByCampaign: Partial<Record<CampaignId, Record<number, string>>> = {
+    forest: {
+      0: `${npcBase} шипит сквозь зубы: «С таким ходом лес съест нас раньше рассвета».`,
+      1: `${npcBase} щурится у костра: «Слышу логику, но в ней пахнет скрытым ударом».`,
+      2: `${npcBase} перехватывает факел: «С этим ответом ты отдаешь маршрут мне».`,
+      3: `${npcBase} кивает коротко: «Уже лучше. Отряд может идти по делу».`,
+      4: `${npcBase} смотрит внимательнее: «Вот это лидерский ход. Так и держи тропу».`,
+    },
+    romance: {
+      0: `${npcBase} вспыхивает: «Ты сейчас бьешь не по теме, а по нам».`,
+      1: `${npcBase} криво улыбается: «Мягко сказано, но укол я услышала».`,
+      2: `${npcBase} закрывается: «Снова тишина. Значит, я решаю все сама».`,
+      3: `${npcBase} выдыхает: «Окей. Это уже разговор, а не защита».`,
+      4: `${npcBase} смягчает взгляд: «Сильный ответ. В таком тоне нас можно спасти».`,
+    },
+    slytherin: {
+      0: `${npcBase} ядовито усмехается: «Грубая сила. Слишком просто для этого круга».`,
+      1: `${npcBase} наклоняет голову: «Реплика умная, но клинок в рукаве я вижу».`,
+      2: `${npcBase} холодно отсекает: «Сдалась быстро. Голос в круге уходит».`,
+      3: `${npcBase} стучит пером по столу: «Рабочий ответ. Продолжай по правилам».`,
+      4: `${npcBase} убирает насмешку: «Это уже политическая архитектура, а не импульс».`,
+    },
+    boss: {
+      0: `${npcBase} режет тоном: «Такой ответ взрывает отдел, а не задачу».`,
+      1: `${npcBase} щурится: «Почти конструктивно, но укол ты не убрала».`,
+      2: `${npcBase} берет встречу под контроль: «С этим ты отдаешь мне весь темп».`,
+      3: `${npcBase} сбавляет нажим: «Наконец-то по делу. Идем дальше».`,
+      4: `${npcBase} фиксирует в блокноте: «Сильный системный ответ. Такой стиль и нужен».`,
+    },
+    narcissist: {
+      0: `${npcBase} отвечает ледяной лаской: «Ты только что превратила разговор в рану».`,
+      1: `${npcBase} мягко колет: «Красиво, но я слышу скрытое обвинение».`,
+      2: `${npcBase} берет паузу власти: «Если молчишь, правила пишу я».`,
+      3: `${npcBase} чуть смягчается: «Это уже честнее. Можно говорить дальше».`,
+      4: `${npcBase} теряет прежний контроль: «Сильная рамка. Тут мной не покрутишь».`,
+    },
+    gryffindor_common_room: {
+      0: `${npcBase} бросает вызов в лоб: «Этим ты поджигаешь зал, а не ведешь его».`,
+      1: `${npcBase} усмехается: «Звучит ровно, но подкол внутри остался».`,
+      2: `${npcBase} машет рукой: «Молчишь — значит, лидерство ушло мимо тебя».`,
+      3: `${npcBase} кивает сдержанно: «Окей, это уже командный ход».`,
+      4: `${npcBase} выпрямляется: «Вот так и держат круг — силой рамки, не крика».`,
+    },
+    ravenclaw_common_room: {
+      0: `${npcBase} холодно замечает: «Импульсно. Доказательность близка к нулю».`,
+      1: `${npcBase} прищуривается: «Почти чисто, но риторический укол остался».`,
+      2: `${npcBase} перехватывает повестку: «С этим ты отдаешь право на вывод».`,
+      3: `${npcBase} кивает: «Аргумент принят. Двигаемся по фактам».`,
+      4: `${npcBase} откладывает сарказм: «Сильный аналитический ход. Это уровень».`,
+    },
+    hufflepuff_common_room: {
+      0: `${npcBase} морщится: «С такой подачей мы снова уйдем в обиду».`,
+      1: `${npcBase} мягко вздыхает: «Словно бережно, но укол в конце режет».`,
+      2: `${npcBase} закрывается: «Опять молчание. Тогда проблема останется гнить».`,
+      3: `${npcBase} теплеет: «Да, вот так можно говорить прямо и не ломать».`,
+      4: `${npcBase} улыбается с уважением: «Это зрелая бережная прямота. Берем в норму».`,
+    },
+    "office-icebreaker": {
+      0: `${npcBase} рубит с ходу: «Это эскалация, не управление встречей».`,
+      1: `${npcBase} качает головой: «Формально чисто, но скрытый укол рушит команду».`,
+      2: `${npcBase} перехватывает руль: «С таким ответом ты отдаешь мне весь процесс».`,
+      3: `${npcBase} фиксирует в чате: «Ок, рабочий вариант. Двигаем задачу».`,
+      4: `${npcBase} меняет тон: «Сильный системный ход. Так и гасится хаос».`,
+    },
+    "boundary-keeper": {
+      0: `${npcBase} давит сильнее: «Этим ты только открываешь новые вторжения».`,
+      1: `${npcBase} улыбается уголком губ: «Почти граница, но ты снова колешь».`,
+      2: `${npcBase} берет инициативу: «С этим молчанием твои рамки исчезают».`,
+      3: `${npcBase} осаживается: «Хорошо, это уже взрослая граница».`,
+      4: `${npcBase} замолкает на секунду: «Сильный системный ответ. Тут не продавить».`,
+    },
+    "serpentine-diplomat": {
+      0: `${npcBase} холодно улыбается: «Прямой нажим? В кулуарах так долго не живут».`,
+      1: `${npcBase} щурится: «Почти дипломатично, но скрытый укус слышен».`,
+      2: `${npcBase} перехватывает сделку: «С этим ты сама отдала рычаг».`,
+      3: `${npcBase} отмечает без иронии: «Рабочий дипломатический ход».`,
+      4: `${npcBase} убирает маску: «Системно. На таких шагах строится долгий контроль».`,
+    },
+    "heart-lines": {
+      0: `${npcBase} глухо отвечает: «Так ты сейчас ранишь, а не сближаешь».`,
+      1: `${npcBase} смотрит в сторону: «Мягко звучит, но шип в конце я почувствовала».`,
+      2: `${npcBase} закрывается: «Опять тишина вместо близости».`,
+      3: `${npcBase} выдыхает: «Да, это уже честный и бережный контакт».`,
+      4: `${npcBase} смягчает голос: «Сильная взрослая реплика. На ней можно строить нас».`,
+    },
+    "mirror-of-truth": {
+      0: `${npcBase} холодно фиксирует: «Эмоция громче метода. Это провал верификации».`,
+      1: `${npcBase} отмечает сухо: «Почти чисто, но манипулятивный хвост остался».`,
+      2: `${npcBase} забирает анализ себе: «С этой тишиной ты отдала право на вывод».`,
+      3: `${npcBase} кивает: «Рабочий аналитический шаг. Продолжаем по методике».`,
+      4: `${npcBase} убирает скепсис: «Сильная системная точность. Это уровень лидера разбора».`,
+    },
+  };
+
+  return presetByCampaign[campaign] ?? genericPreset;
+}
+
+function buildLitRpgStepOptions(campaign: CampaignId, node: QuestNarrativeNode, idx: number, stageIdx: number) {
+  const editorialStep = editorialStepOptionsByCampaign[campaign]?.[idx];
+  if (editorialStep) {
+    const options = editorialStep.options.map((line) => toShortPlayerLine(line)) as [string, string, string, string, string];
+    const correctSingle = Math.max(0, Math.min(options.length - 1, editorialStep.correctSingle));
+    const trapIndex = Math.max(0, Math.min(options.length - 1, editorialStep.trapIndex ?? 1));
+    const npcBase = node.opponentDescription.split(",")[0].trim();
+    const optionNpcReactionByIndex = buildCampaignNpcReactionPreset(campaign, npcBase);
+    const pressureBranch: BranchId = idx % 2 === 0 ? "challenger" : "architect";
+    const bestBranch = inferBestBranchByHint(node.hint, stageIdx, idx);
+    const branchEffects: Record<number, BranchId> = {
+      0: pressureBranch,
+      1: bestBranch,
+      2: pressureBranch === "challenger" ? "architect" : "challenger",
+      3: bestBranch,
+      4: "architect",
+    };
+    branchEffects[trapIndex] = bestBranch;
+    return { options, correctSingle, branchEffects, optionNpcReactionByIndex };
+  }
+
+  // Генераторные варианты отключены: пока работаем только ручной редактурой.
+  // Если кампания еще не перенесена в editorialStepOptionsByCampaign, показываем временный безопасный набор.
+  const options: [string, string, string, string, string] = [
+    "Срываюсь и отвечаю в лоб, лишь бы заткнуть спор",
+    "Звучит вежливо, но я тихо добавляю личный укол",
+    "Ухожу в молчание и отдаю контроль сцене",
+    "Возвращаюсь к фактам и предлагаю рабочий шаг",
+    "Фиксирую правило разговора, чтобы это не повторилось",
+  ];
+  const correctSingle = 4;
+  const npcBase = node.opponentDescription.split(",")[0].trim();
+  const optionNpcReactionByIndex = buildCampaignNpcReactionPreset(campaign, npcBase);
+
+  const pressureBranch: BranchId = idx % 2 === 0 ? "challenger" : "architect";
+  const bestBranch = inferBestBranchByHint(node.hint, stageIdx, idx);
+  const branchEffects: Record<number, BranchId> = {
+    0: pressureBranch,
+    1: bestBranch,
+    2: pressureBranch === "challenger" ? "empath" : "boundary",
+    3: "strategist",
+    4: "architect",
+  };
+
+  return { options, correctSingle, branchEffects, optionNpcReactionByIndex };
+}
+
+function buildDecisionPrompt(campaign: CampaignId, stageIdx: number, idx: number) {
+  const pools = decisionPromptByCampaign[campaign];
+  const safeStage = Math.max(0, Math.min(4, stageIdx));
+  const stagePool = pools[safeStage];
+  return stagePool[idx % stagePool.length];
+}
+
+function buildCampaignInstructionLead(campaign: CampaignId) {
+  const leads: Record<CampaignId, string> = {
+    forest: "Тропа шуршит под ногами, времени мало.",
+    romance: "Между вами жарко, но цену слова видно сразу.",
+    slytherin: "Кулуары не про громкость, а про точность хода.",
+    boss: "Переговорная смотрит на результат, не на эмо-всплеск.",
+    narcissist: "Здесь каждое слово либо укрепляет тебя, либо размывает опору.",
+    gryffindor_common_room: "Гостиная гудит, лидерство проверяют в лоб.",
+    ravenclaw_common_room: "В этой дискуссии выживают аргументы, а не поза.",
+    hufflepuff_common_room: "Мягкий тон не отменяет четких границ.",
+    "office-icebreaker": "На мостике шторм, команде нужен ясный голос.",
+    "boundary-keeper": "Твое «нет» должно звучать спокойно и без вины.",
+    "serpentine-diplomat": "За кулисами выигрывает тот, кто держит рамку.",
+    "heart-lines": "Близость здесь строится честностью, а не уступками себе.",
+    "mirror-of-truth": "Разбор требует фактов, а не красивых оправданий.",
+  };
+  return leads[campaign];
+}
+
+function buildCampaignSceneAccent(campaign: CampaignId, idx: number) {
+  const accents: Record<CampaignId, string[]> = {
+    forest: ["Ночная чаща слушает каждую ошибку.", "Костер трещит, и спор может сорвать весь рейд."],
+    romance: ["Тепло и обида идут рядом.", "Пауза между вами длиннее любой реплики."],
+    slytherin: ["Взгляд в круге важнее громких слов.", "Одна неточная фраза - и влияние тает."],
+    boss: ["Команда читает тебя по первому тону.", "Решение нужно сейчас, но на холодной голове."],
+    narcissist: ["Сладкие слова маскируют контроль.", "Каждая уступка без границы дорогая."],
+    gryffindor_common_room: ["Смех за спиной легко переходит в травлю.", "Кто держит ритм спора, тот ведет комнату."],
+    ravenclaw_common_room: ["Сарказм тут подают как логику.", "Нужно спорить фактами, а не статусом."],
+    hufflepuff_common_room: ["Тишина удобна, но конфликт сам не исчезнет.", "Бережность важна, однако правда тоже важна."],
+    "office-icebreaker": ["Паника любит крик, команда любит структуру.", "Любой разнобой сейчас бьет по срокам."],
+    "boundary-keeper": ["Давление растет, но ты выбираешь формат.", "Границы проверяют именно тогда, когда неудобно."],
+    "serpentine-diplomat": ["Здесь торгуются не словами, а позициями.", "Улыбка может быть частью атаки."],
+    "heart-lines": ["В диалоге важны и нежность, и опора.", "Уязвимость без границ быстро становится болью."],
+    "mirror-of-truth": ["Сомнение полезно, если есть метод.", "Проверка фактов охлаждает шум и драму."],
+  };
+  const pool = accents[campaign];
+  return pool[idx % pool.length];
+}
+
+function buildCampaignHintLead(campaign: CampaignId) {
+  const leads: Record<CampaignId, string> = {
+    forest: "Ориентир рейда:",
+    romance: "Ориентир близости:",
+    slytherin: "Ориентир круга:",
+    boss: "Ориентир переговорной:",
+    narcissist: "Ориентир безопасности:",
+    gryffindor_common_room: "Ориентир гостиной:",
+    ravenclaw_common_room: "Ориентир дискуссии:",
+    hufflepuff_common_room: "Ориентир бережного диалога:",
+    "office-icebreaker": "Ориентир мостика:",
+    "boundary-keeper": "Ориентир границ:",
+    "serpentine-diplomat": "Ориентир кулуаров:",
+    "heart-lines": "Ориентир отношений:",
+    "mirror-of-truth": "Ориентир разбора:",
+  };
+  return leads[campaign];
+}
+
+function getStageIdxByRhythm(campaign: CampaignId, idx: number, total: number) {
+  const minStepsPerStage = 3;
+  const maxStagesByVolume = Math.max(1, Math.floor(total / minStepsPerStage));
+  const preferredStages = total >= 50 ? 5 : total >= 30 ? 4 : total >= 12 ? 3 : total >= 8 ? 2 : 1;
+  const stageCount = Math.max(1, Math.min(preferredStages, maxStagesByVolume));
+  if (stageCount < 5) {
+    return Math.min(stageCount - 1, Math.floor((idx * stageCount) / Math.max(1, total)));
+  }
+  const weights = campaignRhythmProfile[campaign];
+  const sum = weights.reduce((acc, value) => acc + value, 0);
+  const progress = ((idx + 1) / Math.max(1, total)) * sum;
+  let cursor = 0;
+  for (let stage = 0; stage < weights.length; stage += 1) {
+    cursor += weights[stage];
+    if (progress <= cursor) {
+      return stage;
+    }
+  }
+  return 4;
+}
+
+function normalizeOptionKey(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[.,!?;:()[\]{}"«»'`]/g, "")
+    .replace(/ё/g, "е")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capitalizeFirst(text: string) {
+  if (!text) {
+    return text;
+  }
+  return text[0].toUpperCase() + text.slice(1);
+}
+
+function applyLiteraryPolishToOptions(options: string[]) {
+  const polished = options.map((option) => option.replace(/\s+/g, " ").replace(/\s+([,.!?;:])/g, "$1").trim());
+  const firstWord = (value: string) => value.split(" ").find(Boolean)?.toLowerCase() ?? "";
+
+  for (let idx = 1; idx < polished.length; idx += 1) {
+    const prevFirst = firstWord(polished[idx - 1]);
+    const currentFirst = firstWord(polished[idx]);
+    if (!prevFirst || !currentFirst || prevFirst !== currentFirst) {
+      continue;
+    }
+    if (currentFirst === "я") {
+      polished[idx] = capitalizeFirst(polished[idx].replace(/^я\s+/i, ""));
+      continue;
+    }
+    const swaps: Record<string, string[]> = {
+      чтобы: ["Так", "Тогда", "Лучше", "В этот момент"],
+      но: ["При этом", "Одновременно", "И все же", "Однако"],
+    };
+    const pool = swaps[currentFirst];
+    if (pool?.length) {
+      const replacement = pool[idx % pool.length];
+      polished[idx] = polished[idx].replace(new RegExp(`^${currentFirst}\\b`, "i"), replacement);
+    }
+  }
+
+  const trailingTokenCount = new Map<string, number>();
+  polished.forEach((line) => {
+    const lastToken = line.toLowerCase().split(" ").filter(Boolean).slice(-1)[0];
+    if (!lastToken || lastToken.length < 6) {
+      return;
+    }
+    trailingTokenCount.set(lastToken, (trailingTokenCount.get(lastToken) ?? 0) + 1);
+  });
+  for (let idx = 0; idx < polished.length; idx += 1) {
+    const lastToken = polished[idx].toLowerCase().split(" ").filter(Boolean).slice(-1)[0];
+    if (!lastToken || (trailingTokenCount.get(lastToken) ?? 0) < 2) {
+      continue;
+    }
+    polished[idx] = polished[idx].replace(new RegExp(`\\s+${lastToken}$`, "i"), "").trim();
+  }
+
+  for (let idx = 0; idx < polished.length; idx += 1) {
+    polished[idx] = polished[idx]
+      .replace(/\s+чтобы\s+не\s+скатиться\s+в\s+эмоциональные\s+качели/gi, "")
+      .replace(/\s+чтобы\s+остаться\s+в\s+контакте/gi, "")
+      .replace(/\s+чтобы\s+[^.?!]+$/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  return polished;
+}
+
+function reduceCrossOptionWordRepetition(options: string[]) {
+  const tokenized = options.map((line) =>
+    line
+      .toLowerCase()
+      .replace(/[.,!?;:()[\]{}"«»'`]/g, "")
+      .split(/\s+/)
+      .filter((token) => token.length > 4)
+  );
+  const counts = new Map<string, number>();
+  tokenized.forEach((tokens) => {
+    new Set(tokens).forEach((token) => counts.set(token, (counts.get(token) ?? 0) + 1));
+  });
+
+  return options.map((line, idx) => {
+    let next = line;
+    const repeated = Array.from(new Set(tokenized[idx])).filter((token) => (counts.get(token) ?? 0) >= 3);
+    repeated.forEach((token) => {
+      next = next.replace(new RegExp(`\\b${token}\\b`, "i"), "");
+    });
+    return next.replace(/\s+/g, " ").replace(/\s+([,.!?;:])/g, "$1").trim();
+  });
+}
+
+function uniquifyCampaignOptions(
+  options: string[],
+  localUsedKeys: Set<string>,
+  globalUsedKeys: Set<string>,
+  campaign: CampaignId,
+  stepIdx: number,
+  node: QuestNarrativeNode
+) {
+  const contextualByCampaign: Record<CampaignId, string[]> = {
+    forest: ["Держу фокус группы", "Сохраняю темп команды", "Возвращаю разговор к делу"],
+    romance: ["Говорю честно и бережно", "Не отдаю себя давлению", "Сохраняю контакт без самоотмены"],
+    slytherin: ["Требую прозрачные правила", "Не ведусь на статусный нажим", "Возвращаю спор к критериям"],
+    boss: ["Ставлю рабочую рамку", "Фиксирую приоритеты и срок", "Защищаю качество решения"],
+    narcissist: ["Удерживаю личные границы", "Не беру чужую вину", "Сохраняю опору на себя"],
+    gryffindor_common_room: ["Останавливаю эскалацию", "Удерживаю лидерство без крика", "Возвращаю команду к цели"],
+    ravenclaw_common_room: ["Прошу аргументы по сути", "Снимаю высокомерный тон", "Фиксирую проверяемый вывод"],
+    hufflepuff_common_room: ["Говорю мягко и прямо", "Не ухожу в удобное молчание", "Возвращаю разговор к проблеме"],
+    "office-icebreaker": ["Собираю командный фокус", "Останавливаю хаотичный спор", "Перевожу в план действий"],
+    "boundary-keeper": ["Держу спокойную границу", "Не даю продавить формат", "Закрепляю уважительный тон"],
+    "serpentine-diplomat": ["Снимаю интригу фактами", "Удерживаю политическую рамку", "Возвращаю разговор к договоренности"],
+    "heart-lines": ["Удерживаю тепло и ясность", "Не подменяю близость контролем", "Возвращаюсь к честному диалогу"],
+    "mirror-of-truth": ["Не даю давить экспертизой", "Отделяю анализ от атаки", "Фиксирую зрелый итог"],
+  };
+  const sceneAnchorRaw = node.opponentReplica.replace(/[«»"]/g, "").split(/[.!?]/)[0]?.trim() ?? "";
+  const stageContext = contextualByCampaign[campaign];
+
+  return options.map((raw, optionIdx) => {
+    let candidate = raw.trim();
+    let key = normalizeOptionKey(candidate);
+    if (!localUsedKeys.has(key) && !globalUsedKeys.has(key)) {
+      localUsedKeys.add(key);
+      globalUsedKeys.add(key);
+      return candidate;
+    }
+
+    const twists = stageContext;
+    let localTry = 0;
+    while (localTry < twists.length + 2) {
+      const twist = twists[(stepIdx + optionIdx + localTry) % twists.length];
+      const punct = candidate.endsWith(".") ? "" : ".";
+      candidate = `${raw}${punct} ${twist}`.trim();
+      key = normalizeOptionKey(candidate);
+      if (!localUsedKeys.has(key) && !globalUsedKeys.has(key)) {
+        localUsedKeys.add(key);
+        globalUsedKeys.add(key);
+        return candidate;
+      }
+      localTry += 1;
+    }
+
+    const deterministicTail = `${stageContext[(stepIdx + optionIdx) % stageContext.length]} ${toShortPlayerLine(sceneAnchorRaw, 5)}`.trim();
+    candidate = `${raw}. ${deterministicTail}`.replace(/\s+/g, " ").trim();
+    localUsedKeys.add(normalizeOptionKey(candidate));
+    globalUsedKeys.add(normalizeOptionKey(candidate));
+    return candidate;
+  });
 }
 
 function buildLitRpgCampaign(campaign: CampaignId, questions: QuestDifficulty): ForestStep[] {
   const lore = campaignLore[campaign];
-  const arc = campaignStoryArc[campaign];
-  const steps = litrpgDilemmas.map((dilemma, idx) => {
-    const stageIdx = Math.min(4, Math.floor((idx / litrpgDilemmas.length) * 5));
-    const { options, correctSingle, branchEffects } = buildLitRpgStepOptions(dilemma, idx, stageIdx);
-    const beat = arc.beats[stageIdx];
-    const questionLeadPool = stageQuestionLeadByStage[stageIdx];
-    const questionLead = questionLeadPool[idx % questionLeadPool.length];
-    const focus = normalizeConflictFocus(dilemma);
+  const allNodes = getCampaignNodes(campaign);
+  const editorialStepCount = editorialStepOptionsByCampaign[campaign]?.length ?? 0;
+  const nodes = editorialStepCount > 0 ? allNodes.slice(0, editorialStepCount) : allNodes;
+  const localUsedOptionKeys = new Set<string>();
+  let previousStepOptionKeys = new Set<string>();
+  const editorialLockedCampaign = (editorialStepOptionsByCampaign[campaign]?.length ?? 0) > 0;
+  const steps = nodes.map((node, idx) => {
+    const stageIdx = getStageIdxByRhythm(campaign, idx, nodes.length);
+    const { options, correctSingle, branchEffects, optionNpcReactionByIndex } = buildLitRpgStepOptions(campaign, node, idx, stageIdx);
+    const polishedOptions = editorialLockedCampaign
+      ? options
+      : applyLiteraryPolishToOptions(
+          reduceCrossOptionWordRepetition(uniquifyCampaignOptions(options, localUsedOptionKeys, globalOptionKeysRegistry, campaign, idx, node)),
+        ).map((line, optionIdx) => {
+          let candidate = line;
+          let key = normalizeOptionKey(candidate);
+          if (!previousStepOptionKeys.has(key)) {
+            return candidate;
+          }
+          const fallbackTail = ["Скажу это прямо.", "Сформулирую короче.", "Добавлю конкретный шаг.", "Сниму лишний нажим."];
+          candidate = `${line} ${fallbackTail[(idx + optionIdx) % fallbackTail.length]}`.trim();
+          key = normalizeOptionKey(candidate);
+          return previousStepOptionKeys.has(key) ? `${candidate} Сейчас.` : candidate;
+        });
+    previousStepOptionKeys = new Set(polishedOptions.map((line) => normalizeOptionKey(line)));
+    const arcBeat = getCampaignBlockArc(campaign, stageIdx);
+    const decisionPrompt = buildDecisionPrompt(campaign, stageIdx, idx);
+    const instruction = `${buildCampaignInstructionLead(campaign)} ${decisionPrompt}`;
+    const opponentAvatar = pickOpponentAvatar(node.opponentEmotion, node.opponentReplica, idx);
     return {
       id: `${campaign}-litrpg-${idx + 1}`,
       title: `${lore.title} • Эпизод ${idx + 1}`,
       type: "single" as const,
-      scene: `${beat} ${lore.setting} новый удар: ${dilemma}. В этой ${lore.tone} сцене цена ответа очень конкретна.`,
+      scene: `${arcBeat} ${lore.setting}. ${buildCampaignSceneAccent(campaign, idx)} В этой ${lore.tone} сцене цена ответа очень конкретна.`,
       sceneByBranch: {
-        strategist: `${buildBranchSceneLead("strategist", idx, stageIdx)} ${buildOpponentReplica(campaign, dilemma, "strategist")}.`,
-        empath: `${buildBranchSceneLead("empath", idx, stageIdx)} ${buildOpponentReplica(campaign, dilemma, "empath")}.`,
-        boundary: `${buildBranchSceneLead("boundary", idx, stageIdx)} ${buildOpponentReplica(campaign, dilemma, "boundary")}.`,
-        challenger: `${buildBranchSceneLead("challenger", idx, stageIdx)} ${buildOpponentReplica(campaign, dilemma, "challenger")}.`,
-        architect: `${buildBranchSceneLead("architect", idx, stageIdx)} ${buildOpponentReplica(campaign, dilemma, "architect")}.`,
+        strategist: `${buildBranchSceneLead("strategist", idx, stageIdx)} ${buildOpponentReplica(campaign, node.opponentDescription, node.opponentReplica, "strategist", idx, stageIdx)}.`,
+        empath: `${buildBranchSceneLead("empath", idx, stageIdx)} ${buildOpponentReplica(campaign, node.opponentDescription, node.opponentReplica, "empath", idx, stageIdx)}.`,
+        boundary: `${buildBranchSceneLead("boundary", idx, stageIdx)} ${buildOpponentReplica(campaign, node.opponentDescription, node.opponentReplica, "boundary", idx, stageIdx)}.`,
+        challenger: `${buildBranchSceneLead("challenger", idx, stageIdx)} ${buildOpponentReplica(campaign, node.opponentDescription, node.opponentReplica, "challenger", idx, stageIdx)}.`,
+        architect: `${buildBranchSceneLead("architect", idx, stageIdx)} ${buildOpponentReplica(campaign, node.opponentDescription, node.opponentReplica, "architect", idx, stageIdx)}.`,
       },
-      instruction: questionLead,
-      options,
+      instruction,
+      dispositionText: node.disposition,
+      opponentName: node.opponentDescription,
+      opponentSpeech: node.opponentReplica,
+      opponentAvatar,
+      options: polishedOptions,
       correctSingle,
       branchEffects,
+      optionNpcReactionByIndex,
       endingHint: `ending-${campaign}-${(idx % 5) + 1}`,
       skillSignals: ["Деэскалация", "Переговоры", "Границы", "Эмпатия", "Лидерство"],
-      sceneEmoji: pickSceneEmoji(dilemma, idx),
-      hint: `Сильный ход в этом эпизоде: факт + граница + следующий шаг. ${arc.finale}`,
+      sceneEmoji: node.emoji,
+      hint: `${buildCampaignHintLead(campaign)} ${node.hint} ${campaignStoryArc[campaign].finale}`,
       reward: 10 + Math.floor(idx / 4),
       image: lore.icon,
     } satisfies ForestStep;
@@ -2263,6 +3621,35 @@ function buildLitRpgCampaign(campaign: CampaignId, questions: QuestDifficulty): 
     ...step,
     id: `${step.id}-${idx + 1}`,
   }));
+}
+
+function runGlobalOptionUniquenessAudit() {
+  const allCampaignIds = Object.keys(campaignLore) as CampaignId[];
+  const difficulties: QuestDifficulty[] = [5, 10, 15, 25, 125];
+  const optionMap = new Map<string, string[]>();
+
+  globalOptionKeysRegistry.clear();
+
+  allCampaignIds.forEach((campaign) => {
+    difficulties.forEach((difficulty) => {
+      const steps = buildLitRpgCampaign(campaign, difficulty);
+      steps.forEach((step) => {
+        if (!step.options?.length) {
+          return;
+        }
+        step.options.forEach((option, optionIdx) => {
+          const key = normalizeOptionKey(option);
+          const origin = `${campaign}:${difficulty}:${step.id}:${optionIdx + 1}`;
+          const prev = optionMap.get(key) ?? [];
+          optionMap.set(key, [...prev, origin]);
+        });
+      });
+    });
+  });
+
+  return Array.from(optionMap.entries())
+    .filter(([, origins]) => origins.length > 1)
+    .map(([key, origins]) => `${key} -> ${origins.join(" | ")}`);
 }
 
 function buildEndingId(campaign: CampaignId, ending: EndingRouteId) {
@@ -2282,14 +3669,68 @@ function formatAchievementLabel(value: string) {
   const campaign = campaignRaw as CampaignId;
   const ending = branchRaw as EndingRouteId;
   const campaignName = campaignLore[campaign]?.title ?? campaignRaw;
-  const endingName = endingRouteName[ending] ?? branchRaw;
+  const endingName = endingRouteName[ending] ?? (extendedEndingMetaById[branchRaw as ExtendedNarrativeEndingId]?.label ?? branchRaw);
   return `${campaignName} — ${endingName}`;
+}
+
+function parseAchievement(value: string): { campaign: CampaignId; ending: EndingRouteId } | null {
+  const parts = value.split(":");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const [, campaignRaw, endingRaw] = parts;
+  const campaign = campaignRaw as CampaignId;
+  const ending = endingRaw as EndingRouteId;
+  if (!campaignLore[campaign] || (!endingRouteName[ending] && !extendedEndingMetaById[endingRaw as ExtendedNarrativeEndingId])) {
+    return null;
+  }
+  return { campaign, ending: endingRaw as EndingRouteId };
 }
 
 function formatStepType(type: ForestStepType) {
   if (type === "single") return "один выбор";
   if (type === "multiple") return "несколько выборов";
   return "сборка фразы";
+}
+
+function detectBranchFromKey(value: string): BranchId | null {
+  const lowered = value.toLowerCase();
+  if (lowered.includes("strategist")) return "strategist";
+  if (lowered.includes("empath")) return "empath";
+  if (lowered.includes("boundary")) return "boundary";
+  if (lowered.includes("challenger")) return "challenger";
+  if (lowered.includes("architect")) return "architect";
+  return null;
+}
+
+function formatTacticLabelRu(value: string) {
+  const branch = detectBranchFromKey(value);
+  if (branch) {
+    return branchScaleUi[branch].label;
+  }
+  return value;
+}
+
+function formatErrorTypeLabelRu(errorType: string) {
+  const lowered = errorType.toLowerCase();
+  const mode = lowered.startsWith("single_")
+    ? "Один выбор"
+    : lowered.startsWith("multiple_")
+      ? "Несколько выборов"
+      : lowered.startsWith("builder_")
+        ? "Сборка фразы"
+        : "Шаг";
+  if (lowered.endsWith("_correct")) {
+    return `${mode} — верно`;
+  }
+  const branch = detectBranchFromKey(lowered);
+  if (branch) {
+    return `${mode} — ошибка в стиле «${branchScaleUi[branch].label}»`;
+  }
+  if (lowered.includes("unknown")) {
+    return `${mode} — ошибка (другое)`;
+  }
+  return errorType;
 }
 
 function buildBranchScaleData(score: Record<BranchId, number>) {
@@ -2339,6 +3780,15 @@ const difficultyConfigs: DifficultyConfig[] = [
     description: "Длинная арка 5+5+10+5: симпатия, сахарное шоу, абьюз, расставание.",
     expectedPenaltyRate: 0.16,
   },
+  {
+    questions: 125,
+    label: "Эпопея",
+    color: "#7C3AED",
+    rewardMultiplier: 2.2,
+    penalty: 5,
+    description: "Полный путь 5 этапов по 25 ходов.",
+    expectedPenaltyRate: 0.18,
+  },
 ];
 
 const storyConfigs: StoryConfig[] = [
@@ -2346,38 +3796,61 @@ const storyConfigs: StoryConfig[] = [
     id: "forest",
     label: "Лес Эмоций",
     emoji: "🌲",
-    description: "Базовый микс конфликтов и коммуникации.",
+    description: "Туман, нервы и живые сцены, где одно точное слово способно спасти доверие команды.",
     difficulties: [5, 10, 15, 25],
   },
   {
     id: "romance",
     label: "Любовный роман",
     emoji: "💖",
-    description: "Пошаговые сцены про симпатию, границы и диалог.",
+    description: "Чувства растут, ставки выше, а каждый разговор проверяет: близость у вас или игра в близость.",
     difficulties: [5, 10, 15, 25],
   },
   {
     id: "slytherin",
     label: "Гостиная Слизерина",
     emoji: "🐍",
-    description: "Интрига, статус и холодные переговоры.",
+    description: "Подземелья полны интриг и токсичных намёков. Выживает тот, кто держит холодную голову и точную речь.",
     difficulties: [5, 10, 15, 25],
   },
   {
     id: "boss",
     label: "Стервозная начальница",
     emoji: "💼",
-    description: "Офисная драма и уверенные рабочие границы.",
+    description: "Корпоративный шторм: давление, обесценивание и дедлайны. Твоя задача - не сломаться и не прогнуться.",
     difficulties: [5, 10, 15, 25],
   },
   {
     id: "narcissist",
     label: "Влюбись в нарцисса",
     emoji: "🖤",
-    description: "Длинная арка 5+5+10+5 от симпатии до расставания.",
+    description: "Сначала идеальная сказка, потом качели контроля. Квест про границы, самоценность и выход из токсичного круга.",
     difficulties: [25],
   },
+  {
+    id: "gryffindor_common_room",
+    label: "Гостиная Гриффиндора",
+    emoji: "🦁",
+    description: "Жаркий зал, резкие подколы и борьба за право вести. Лидерство здесь выигрывают не криком, а характером.",
+    difficulties: [125],
+  },
+  {
+    id: "ravenclaw_common_room",
+    label: "Гостиная Когтеврана",
+    emoji: "🦅",
+    description: "Острые умы, холодные формулировки и давление интеллектом. Здесь побеждает ясная логика без высокомерия.",
+    difficulties: [125],
+  },
+  {
+    id: "hufflepuff_common_room",
+    label: "Гостиная Пуффендуя",
+    emoji: "🦡",
+    description: "Тепло и вежливость легко превращаются в избегание. Квест учит говорить честно, но бережно.",
+    difficulties: [125],
+  },
 ];
+
+const adultOnlyStories: QuestStory[] = ["narcissist"];
 
 function buildForestQuestByDifficulty(questions: QuestDifficulty, story: QuestStory): ForestStep[] {
   return buildLitRpgCampaign(story, questions).map((template) => ({
@@ -2435,6 +3908,15 @@ function shuffleWords(words: string[]) {
   return copy;
 }
 
+function shuffleIndices(size: number) {
+  const copy = Array.from({ length: size }, (_, idx) => idx);
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 function calculateQuestForecast(steps: ForestStep[], config: DifficultyConfig, accuracy = 0.8) {
   const totalRawReward = steps.reduce((sum, step) => sum + Math.round(step.reward * config.rewardMultiplier), 0);
   const expectedCorrect = Math.round(steps.length * accuracy);
@@ -2453,6 +3935,8 @@ const followUpHints = [
   "Какая автоматическая мысль появилась первой?",
   "Какой более бережный ответ ты можешь выбрать сейчас?",
 ];
+
+const storyRatingOptions = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
 const artifacts = [
   "Компас Самонаблюдения",
@@ -2615,8 +4099,20 @@ function CardIllustration({ name }: { name?: IllustrationName }) {
   );
 }
 
-function AppCard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+function AppCard({
+  children,
+  style,
+  onLayout,
+}: {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  onLayout?: ComponentProps<typeof View>["onLayout"];
+}) {
+  return (
+    <View style={[styles.card, style]} onLayout={onLayout}>
+      {children}
+    </View>
+  );
 }
 
 function AppButton({
@@ -2624,6 +4120,7 @@ function AppButton({
   onPress,
   variant = "primary",
   pulse = false,
+  disabled = false,
   style,
   textStyle,
 }: {
@@ -2631,6 +4128,7 @@ function AppButton({
   onPress: () => void;
   variant?: "primary" | "secondary";
   pulse?: boolean;
+  disabled?: boolean;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 }) {
@@ -2668,15 +4166,62 @@ function AppButton({
         style={({ pressed }) => [
           styles.buttonBase,
           isPrimary ? styles.buttonPrimary : styles.buttonSecondary,
-          pressed && styles.buttonPressed,
+          !isPrimary && !disabled && styles.buttonSecondaryActive,
+          pressed && !disabled && styles.buttonPressed,
+          disabled && styles.buttonDisabled,
           style,
         ]}
+        disabled={disabled}
         onPress={onPress}
       >
-        <Text style={[isPrimary ? styles.buttonPrimaryText : styles.buttonSecondaryText, textStyle]}>{label}</Text>
+        <Text
+          style={[
+            isPrimary ? styles.buttonPrimaryText : styles.buttonSecondaryText,
+            disabled && styles.buttonDisabledText,
+            textStyle,
+          ]}
+        >
+          {label}
+        </Text>
       </Pressable>
     </Animated.View>
   );
+}
+
+function ClaimRewardButton({
+  label,
+  onPress,
+  canClaim,
+  style,
+}: {
+  label: string;
+  onPress: () => void;
+  canClaim: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <AppButton
+      label={label}
+      onPress={onPress}
+      disabled={!canClaim}
+      pulse={canClaim}
+      style={[canClaim ? styles.claimRewardButtonReady : styles.claimRewardButtonIdle, style]}
+    />
+  );
+}
+
+function TransferActionButton({
+  label,
+  onPress,
+  enabled,
+  style,
+}: {
+  label: string;
+  onPress: () => void;
+  enabled: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return <AppButton label={label} variant="secondary" onPress={onPress} disabled={!enabled} style={style} />;
 }
 
 function ScreenHeading({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -2688,15 +4233,33 @@ function ScreenHeading({ title, subtitle }: { title: string; subtitle?: string }
   );
 }
 
-function SpeechBubble({ text }: { text: string }) {
+function SpeechBubble({
+  text,
+  speakerName,
+  speakerEmoji,
+}: {
+  text: string;
+  speakerName?: string;
+  speakerEmoji?: string;
+}) {
+  const normalizedSpeakerName = (speakerName ?? "Персонаж").trim();
+  const speakerLabel = normalizedSpeakerName
+    ? normalizedSpeakerName[0].toUpperCase() + normalizedSpeakerName.slice(1)
+    : "Персонаж";
   return (
     <View style={styles.speechBubbleWrap}>
-      <View style={styles.speechBubbleHeader}>
-        <Text style={styles.speechSpeakerEmoji}>🗨️</Text>
-        <Text style={styles.speechSpeakerName}>Персонаж</Text>
-      </View>
-      <View style={styles.speechBubble}>
-        <Text style={styles.speechBubbleText}>{text}</Text>
+      <View style={styles.speechBubbleRow}>
+        <View style={styles.speechAvatarWrap}>
+          <Text style={styles.speechAvatarEmoji}>{speakerEmoji ?? "🗨️"}</Text>
+        </View>
+        <View style={styles.speechBubbleColumn}>
+          <View style={styles.speechBubbleHeader}>
+            <Text style={styles.speechSpeakerName}>{speakerLabel}</Text>
+          </View>
+          <View style={styles.speechBubble}>
+            <Text style={styles.speechBubbleText}>{text}</Text>
+          </View>
+        </View>
       </View>
       <View style={styles.speechBubbleTail} />
     </View>
@@ -2751,7 +4314,7 @@ function HeroBanner({
   );
 }
 
-function ScrollHint() {
+function ScrollHint({ onPress }: { onPress?: () => void }) {
   const hintAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -2776,10 +4339,12 @@ function ScrollHint() {
 
   const translateY = hintAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 5] });
   return (
-    <Animated.View style={[styles.scrollHintWrap, { transform: [{ translateY }] }]}>
-      <Feather name="chevrons-down" size={16} color={colors.textSecondary} />
-      <Text style={styles.scrollHintText}>Листай ниже</Text>
-    </Animated.View>
+    <Pressable onPress={onPress}>
+      <Animated.View style={[styles.scrollHintWrap, { transform: [{ translateY }] }]}>
+        <Feather name="chevrons-down" size={16} color={colors.textSecondary} />
+        <Text style={styles.scrollHintText}>Листай ниже</Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -2827,6 +4392,25 @@ function sanitizeConflictStyle(value: unknown): ConflictStyleId {
   return isConflictStyleId(value) ? value : "avoiding";
 }
 
+function sanitizeProfileGender(value: unknown): ProfileGender {
+  return value === "male" ? "male" : "female";
+}
+
+function applyGenderToPlayerReplica(text: string, gender: ProfileGender) {
+  if (gender === "female") {
+    return text;
+  }
+  return text
+    .replace(/\bЯ сделала\b/g, "Я сделал")
+    .replace(/\bя сделала\b/g, "я сделал")
+    .replace(/\bЯ сказала\b/g, "Я сказал")
+    .replace(/\bя сказала\b/g, "я сказал")
+    .replace(/\bЯ собрала\b/g, "Я собрал")
+    .replace(/\bя собрала\b/g, "я собрал")
+    .replace(/\bготова\b/g, "готов")
+    .replace(/\bдолжна\b/g, "должен");
+}
+
 function sanitizeSecondaryConflictStyles(value: unknown, primary: ConflictStyleId): ConflictStyleId[] {
   if (!Array.isArray(value)) {
     return [];
@@ -2847,15 +4431,139 @@ function sanitizeStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string").slice(0, 300);
 }
 
+function sanitizeShortText(value: unknown, fallback: string, max = 120): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  return trimmed.slice(0, max);
+}
+
+function sanitizeRecordNumber(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => typeof v === "number" && Number.isFinite(v))
+    .slice(0, 200);
+  return Object.fromEntries(entries) as Record<string, number>;
+}
+
+function sanitizePracticeStats(value: unknown): PracticeStats {
+  if (!value || typeof value !== "object") {
+    return buildDefaultPracticeStats();
+  }
+  const source = value as Partial<PracticeStats>;
+  return {
+    answersCorrect: typeof source.answersCorrect === "number" ? source.answersCorrect : 0,
+    answersIncorrect: typeof source.answersIncorrect === "number" ? source.answersIncorrect : 0,
+    errorByType: sanitizeRecordNumber(source.errorByType),
+    wrongTacticByType: sanitizeRecordNumber(source.wrongTacticByType),
+  };
+}
+
+function sanitizeEventProgress(value: unknown, legacyJoined?: boolean): EventProgress {
+  const fallback = buildDefaultEventProgress();
+  if (!value || typeof value !== "object") {
+    if (legacyJoined) {
+      return { ...fallback, joined: true };
+    }
+    return fallback;
+  }
+  const source = value as Partial<EventProgress>;
+  return {
+    eventId: typeof source.eventId === "string" ? source.eventId : seasonalEventMvp.id,
+    joined: typeof source.joined === "boolean" ? source.joined : Boolean(legacyJoined),
+    started: Boolean(source.started),
+    finished: Boolean(source.finished),
+    rewardClaimed: Boolean(source.rewardClaimed),
+    currentStep:
+      typeof source.currentStep === "number" && Number.isFinite(source.currentStep)
+        ? Math.max(0, Math.min(seasonalEventMvp.steps.length, source.currentStep))
+        : 0,
+    completedStepIds: sanitizeStringArray(source.completedStepIds),
+    xpEarned: typeof source.xpEarned === "number" && Number.isFinite(source.xpEarned) ? Math.max(0, source.xpEarned) : 0,
+    energyEarned:
+      typeof source.energyEarned === "number" && Number.isFinite(source.energyEarned) ? Math.max(0, source.energyEarned) : 0,
+    errors: typeof source.errors === "number" && Number.isFinite(source.errors) ? Math.max(0, source.errors) : 0,
+    penalties: typeof source.penalties === "number" && Number.isFinite(source.penalties) ? Math.max(0, source.penalties) : 0,
+  };
+}
+
+function sanitizeQuestRatingStats(value: unknown): QuestRatingStats {
+  const fallback = buildDefaultQuestRatingStats();
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+  const source = value as Partial<Record<QuestStory, QuestRatingSummary>>;
+  return {
+    forest: {
+      sum: typeof source.forest?.sum === "number" ? Math.max(0, source.forest.sum) : 0,
+      count: typeof source.forest?.count === "number" ? Math.max(0, source.forest.count) : 0,
+    },
+    romance: {
+      sum: typeof source.romance?.sum === "number" ? Math.max(0, source.romance.sum) : 0,
+      count: typeof source.romance?.count === "number" ? Math.max(0, source.romance.count) : 0,
+    },
+    slytherin: {
+      sum: typeof source.slytherin?.sum === "number" ? Math.max(0, source.slytherin.sum) : 0,
+      count: typeof source.slytherin?.count === "number" ? Math.max(0, source.slytherin.count) : 0,
+    },
+    boss: {
+      sum: typeof source.boss?.sum === "number" ? Math.max(0, source.boss.sum) : 0,
+      count: typeof source.boss?.count === "number" ? Math.max(0, source.boss.count) : 0,
+    },
+    narcissist: {
+      sum: typeof source.narcissist?.sum === "number" ? Math.max(0, source.narcissist.sum) : 0,
+      count: typeof source.narcissist?.count === "number" ? Math.max(0, source.narcissist.count) : 0,
+    },
+    gryffindor_common_room: {
+      sum: typeof source.gryffindor_common_room?.sum === "number" ? Math.max(0, source.gryffindor_common_room.sum) : 0,
+      count: typeof source.gryffindor_common_room?.count === "number" ? Math.max(0, source.gryffindor_common_room.count) : 0,
+    },
+    ravenclaw_common_room: {
+      sum: typeof source.ravenclaw_common_room?.sum === "number" ? Math.max(0, source.ravenclaw_common_room.sum) : 0,
+      count: typeof source.ravenclaw_common_room?.count === "number" ? Math.max(0, source.ravenclaw_common_room.count) : 0,
+    },
+    hufflepuff_common_room: {
+      sum: typeof source.hufflepuff_common_room?.sum === "number" ? Math.max(0, source.hufflepuff_common_room.sum) : 0,
+      count: typeof source.hufflepuff_common_room?.count === "number" ? Math.max(0, source.hufflepuff_common_room.count) : 0,
+    },
+  };
+}
+
+function sanitizeAvatarUri(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.slice(0, 2000);
+}
+
 function buildDefaultProfile(): UserProfile {
   return {
+    displayName: "Герой леса",
+    avatarUri: null,
+    gender: "female",
+    isAdult18Plus: true,
+    profileSetupDone: false,
+    aboutMe: "Тренирую диалог и границы в сложных разговорах.",
+    friendEmails: [],
     xp: 124,
+    energy: 0,
     completedCount: 0,
     lastFeedback: "Твоя рефлексия сегодня запустит рост Кристалла Эмпатии.",
     selectedQuestId: dailyQuests[0].id,
-    eventJoined: false,
+    eventProgress: buildDefaultEventProgress(),
     selectedDifficulty: 5,
     selectedStory: "forest",
+    startedStoryIds: [],
     activeTab: "map",
     conflictPrimaryStyle: "avoiding",
     conflictSecondaryStyles: ["accommodating"],
@@ -2864,6 +4572,19 @@ function buildDefaultProfile(): UserProfile {
     activeProgramMode: "story",
     unlockedEndings: [],
     unlockedAchievements: [],
+    practiceStats: buildDefaultPracticeStats(),
+    questRatingStats: buildDefaultQuestRatingStats(),
+    soundEnabled: true,
+    claimedDailyEnergyAt: null,
+    welcomeEnergyGranted: false,
+    grantedPerfectStageIds: [],
+    redeemedPromoCodes: [],
+    referralInvitesCompleted: 0,
+    unlockedPaidStageKeys: [],
+    energyTransfersSentToday: 0,
+    energyTransfersSentWeek: 0,
+    lastEnergyTransferAt: null,
+    lastSeenAt: null,
   };
 }
 
@@ -2871,37 +4592,63 @@ export default function App() {
   const defaultProfile = useMemo(() => buildDefaultProfile(), []);
   const [authReady, setAuthReady] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole>("USER");
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
+  const [authNickname, setAuthNickname] = useState("");
+  const [authGender, setAuthGender] = useState<ProfileGender>("female");
+  const [authIsAdult18Plus, setAuthIsAdult18Plus] = useState(true);
+  const [authAvatarUri, setAuthAvatarUri] = useState<string | null>(null);
   const [authError, setAuthError] = useState("");
   const [authInfo, setAuthInfo] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isProfileHydrated, setIsProfileHydrated] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("map");
   const [streak] = useState(5);
+  const [displayName, setDisplayName] = useState(defaultProfile.displayName);
+  const [avatarUri, setAvatarUri] = useState<string | null>(defaultProfile.avatarUri);
+  const [profileGender, setProfileGender] = useState<ProfileGender>(defaultProfile.gender);
+  const [isAdult18Plus, setIsAdult18Plus] = useState(defaultProfile.isAdult18Plus);
+  const [profileSetupDone, setProfileSetupDone] = useState(defaultProfile.profileSetupDone);
+  const [profileNameDraft, setProfileNameDraft] = useState(defaultProfile.displayName);
+  const [aboutMe, setAboutMe] = useState(defaultProfile.aboutMe);
+  const [friendEmails, setFriendEmails] = useState<string[]>(defaultProfile.friendEmails);
   const [xp, setXp] = useState(defaultProfile.xp);
+  const [energy, setEnergy] = useState(defaultProfile.energy);
+  const [animatedXp, setAnimatedXp] = useState(defaultProfile.xp);
+  const [animatedEnergy, setAnimatedEnergy] = useState(defaultProfile.energy);
   const [completedCount, setCompletedCount] = useState(defaultProfile.completedCount);
   const [answer, setAnswer] = useState("");
   const [lastFeedback, setLastFeedback] = useState(defaultProfile.lastFeedback);
   const [selectedQuestId, setSelectedQuestId] = useState(defaultProfile.selectedQuestId);
-  const [eventJoined, setEventJoined] = useState(defaultProfile.eventJoined);
+  const [eventProgress, setEventProgress] = useState<EventProgress>(defaultProfile.eventProgress);
+  const [eventSelectedSingle, setEventSelectedSingle] = useState<number | null>(null);
+  const [eventSelectedMultiple, setEventSelectedMultiple] = useState<number[]>([]);
+  const [eventSelectedBuilderIndices, setEventSelectedBuilderIndices] = useState<number[]>([]);
+  const [eventShuffledTokenBank, setEventShuffledTokenBank] = useState<string[]>([]);
+  const [eventWrongSingleIndex, setEventWrongSingleIndex] = useState<number | null>(null);
+  const [eventStepErrorCount, setEventStepErrorCount] = useState(0);
+  const [eventStepMessage, setEventStepMessage] = useState("Вступи в ивент и запусти первый шаг.");
+  const [eventShowHint, setEventShowHint] = useState(false);
   const [forestStepIndex, setForestStepIndex] = useState(0);
   const [forestStarted, setForestStarted] = useState(false);
   const [forestFinished, setForestFinished] = useState(false);
   const [selectedSingle, setSelectedSingle] = useState<number | null>(null);
   const [selectedMultiple, setSelectedMultiple] = useState<number[]>([]);
+  const [displayOptionOrder, setDisplayOptionOrder] = useState<number[]>([]);
   const [selectedBuilderIndices, setSelectedBuilderIndices] = useState<number[]>([]);
   const [stepErrorCount, setStepErrorCount] = useState(0);
   const [totalErrors, setTotalErrors] = useState(0);
   const [penaltyCount, setPenaltyCount] = useState(0);
   const [forestXpEarned, setForestXpEarned] = useState(0);
   const [firstTrySuccess, setFirstTrySuccess] = useState(0);
-  const [stepMessage, setStepMessage] = useState("Выбери действие и нажми «Проверить шаг».");
-  const [showHint, setShowHint] = useState(false);
+  const [stepMessage, setStepMessage] = useState("Выбери действие и нажми «Сделать ход».");
+  const [questHintBubbleText, setQuestHintBubbleText] = useState<string | null>(null);
   const [selectedDifficulty, setSelectedDifficulty] = useState<QuestDifficulty>(defaultProfile.selectedDifficulty);
   const [selectedStory, setSelectedStory] = useState<QuestStory>(defaultProfile.selectedStory);
+  const [startedStoryIds, setStartedStoryIds] = useState<QuestStory[]>(defaultProfile.startedStoryIds);
   const [activeProgramMode, setActiveProgramMode] = useState<ProgramMode>(defaultProfile.activeProgramMode);
   const [conflictPrimaryStyle, setConflictPrimaryStyle] = useState<ConflictStyleId>(defaultProfile.conflictPrimaryStyle);
   const [conflictSecondaryStyles, setConflictSecondaryStyles] = useState<ConflictStyleId[]>(defaultProfile.conflictSecondaryStyles);
@@ -2909,12 +4656,45 @@ export default function App() {
   const [selectedCourseId, setSelectedCourseId] = useState<CourseId>(defaultProfile.selectedCourseId);
   const [unlockedEndings, setUnlockedEndings] = useState<string[]>(defaultProfile.unlockedEndings);
   const [unlockedAchievements, setUnlockedAchievements] = useState<string[]>(defaultProfile.unlockedAchievements);
+  const [practiceStats, setPracticeStats] = useState<PracticeStats>(defaultProfile.practiceStats);
+  const [questRatingStats, setQuestRatingStats] = useState<QuestRatingStats>(defaultProfile.questRatingStats);
+  const [storyPreviewId, setStoryPreviewId] = useState<QuestStory | null>(null);
+  const [pendingStoryRating, setPendingStoryRating] = useState(0);
+  const [ratingVoteLocked, setRatingVoteLocked] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(defaultProfile.soundEnabled);
+  const [claimedDailyEnergyAt, setClaimedDailyEnergyAt] = useState<string | null>(defaultProfile.claimedDailyEnergyAt);
+  const [welcomeEnergyGranted, setWelcomeEnergyGranted] = useState(defaultProfile.welcomeEnergyGranted);
+  const [grantedPerfectStageIds, setGrantedPerfectStageIds] = useState<string[]>(defaultProfile.grantedPerfectStageIds);
+  const [redeemedPromoCodes, setRedeemedPromoCodes] = useState<string[]>(defaultProfile.redeemedPromoCodes);
+  const [referralInvitesCompleted, setReferralInvitesCompleted] = useState(defaultProfile.referralInvitesCompleted);
+  const [unlockedPaidStageKeys, setUnlockedPaidStageKeys] = useState<string[]>(defaultProfile.unlockedPaidStageKeys);
+  const [energyTransfersSentToday, setEnergyTransfersSentToday] = useState(defaultProfile.energyTransfersSentToday);
+  const [energyTransfersSentWeek, setEnergyTransfersSentWeek] = useState(defaultProfile.energyTransfersSentWeek);
+  const [lastEnergyTransferAt, setLastEnergyTransferAt] = useState<string | null>(defaultProfile.lastEnergyTransferAt);
+  const [lastSeenAt, setLastSeenAt] = useState<string | null>(defaultProfile.lastSeenAt);
+  const [promoCodeInput, setPromoCodeInput] = useState("");
+  const [promoInfo, setPromoInfo] = useState("");
+  const [transferAmountInput, setTransferAmountInput] = useState("10");
+  const [friendEmailInput, setFriendEmailInput] = useState("");
+  const [selectedFriendEmail, setSelectedFriendEmail] = useState("");
+  const [openedFriendEmail, setOpenedFriendEmail] = useState<string | null>(null);
+  const [friendProfiles, setFriendProfiles] = useState<
+    Record<
+      string,
+      Pick<UserProfile, "displayName" | "aboutMe" | "xp" | "energy" | "completedCount" | "conflictPrimaryStyle">
+    >
+  >({});
+  const economyMode = economyApi.getMode();
   const [diagnosticIndex, setDiagnosticIndex] = useState(0);
   const [diagnosticAnswers, setDiagnosticAnswers] = useState<number[]>([]);
   const [diagnosticError, setDiagnosticError] = useState("");
   const [showDiagnosticResult, setShowDiagnosticResult] = useState(false);
+  const [mapCatalogTab, setMapCatalogTab] = useState<MapCatalogTab>("all");
+  const [activeCatalogTag, setActiveCatalogTag] = useState<string | null>(null);
   const [lastStepPraise, setLastStepPraise] = useState("");
   const [successPulseTick, setSuccessPulseTick] = useState(0);
+  const [stageRoadExpanded, setStageRoadExpanded] = useState(false);
+  const [openAchievementId, setOpenAchievementId] = useState<string | null>(null);
   const [shuffledTokenBank, setShuffledTokenBank] = useState<string[]>([]);
   const [branchScore, setBranchScore] = useState<Record<BranchId, number>>({
     strategist: 0,
@@ -2923,16 +4703,69 @@ export default function App() {
     challenger: 0,
     architect: 0,
   });
-  const [analyticsSnapshot, setAnalyticsSnapshot] = useState<Record<string, UserAnalytics>>({});
+  const [answerBucketUsage, setAnswerBucketUsage] = useState<[number, number, number, number, number]>([0, 0, 0, 0, 0]);
+  const [stageTacticUsage, setStageTacticUsage] = useState<Record<BranchId, number>>({
+    strategist: 0,
+    empath: 0,
+    boundary: 0,
+    challenger: 0,
+    architect: 0,
+  });
+  const [stageForgivenErrorByType, setStageForgivenErrorByType] = useState<Record<string, number>>({});
+  const [stageProgressSummary, setStageProgressSummary] = useState<StageProgressSummary | null>(null);
+  const [questFinalSummary, setQuestFinalSummary] = useState<QuestFinalSummary | null>(null);
+  const [, setAnalyticsSnapshot] = useState<Record<string, UserAnalytics>>({});
+  const [adminUsers, setAdminUsers] = useState<AdminUserView[]>([]);
+  const [adminUserSearch, setAdminUserSearch] = useState("");
+  const [expandedAdminEmail, setExpandedAdminEmail] = useState<string | null>(null);
+  const questHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const closeQuestHintBubble = () => {
+    if (questHintTimeoutRef.current) {
+      clearTimeout(questHintTimeoutRef.current);
+      questHintTimeoutRef.current = null;
+    }
+    setQuestHintBubbleText(null);
+  };
+
+  const openQuestHintBubble = (text: string, source: "instruction" | "hint") => {
+    if (!text.trim()) {
+      return;
+    }
+    if (questHintTimeoutRef.current) {
+      clearTimeout(questHintTimeoutRef.current);
+    }
+    setQuestHintBubbleText(text);
+    questHintTimeoutRef.current = setTimeout(() => {
+      setQuestHintBubbleText(null);
+      questHintTimeoutRef.current = null;
+    }, 10000);
+    trackAnalyticsEvent("hint_opened", {
+      stepIndex: forestStepIndex,
+      details: `${activeForestStep?.id ?? "n/a"};source:${source}`,
+    }).catch(() => undefined);
+  };
+  const [adminGrantAmountByEmail, setAdminGrantAmountByEmail] = useState<Record<string, string>>({});
+  const [adminActionMessage, setAdminActionMessage] = useState("");
+  const [isClaimingDailyEnergy, setIsClaimingDailyEnergy] = useState(false);
+  const soundPoolRef = useRef<Partial<Record<"tap" | "swipe" | "step_success" | "quest_finish_positive" | "quest_finish_negative", Audio.Sound>>>({});
+  const soundCooldownRef = useRef<Record<string, number>>({});
+  const mapScrollRef = useRef<ScrollView | null>(null);
+  const courseCardYRef = useRef<Partial<Record<CourseId, number>>>({});
   const successAnim = useRef(new Animated.Value(0)).current;
   const sessionStartedAtRef = useRef<number | null>(null);
+  const stageStartedAtRef = useRef<number | null>(null);
   const activeTabRef = useRef<Tab>("map");
+  const reactivationCheckDoneForRef = useRef<string | null>(null);
+  const authBackendMode = authApi.getMode();
+  const isServerAuth = authBackendMode === "server";
 
   const selectedQuest = useMemo(
     () => dailyQuests.find((quest) => quest.id === selectedQuestId) ?? dailyQuests[0],
     [selectedQuestId]
   );
   const activeStoryConfig = storyConfigs.find((story) => story.id === selectedStory) ?? storyConfigs[0];
+  const previewStoryConfig = storyConfigs.find((story) => story.id === storyPreviewId) ?? null;
   const activeCourse = courses.find((course) => course.id === selectedCourseId) ?? courses[0];
   const activeCampaignId: CampaignId = activeProgramMode === "course" ? activeCourse.id : selectedStory;
   const allowedStoryDifficulties =
@@ -2953,6 +4786,18 @@ export default function App() {
     [activeDifficultyConfig, normalizedQuestSteps]
   );
   const activeForestStep = normalizedQuestSteps[forestStepIndex];
+  const previewStorySteps = useMemo(
+    () => (previewStoryConfig ? buildForestQuestByDifficulty(previewStoryConfig.difficulties[0], previewStoryConfig.id) : []),
+    [previewStoryConfig]
+  );
+  const eventSteps = seasonalEventMvp.steps;
+  const activeEventStep: SeasonalEventStep | undefined = eventSteps[eventProgress.currentStep];
+  const eventProgressPercent = Math.round((eventProgress.currentStep / eventSteps.length) * 100);
+  const eventCompletedCount = Math.min(eventSteps.length, eventProgress.currentStep);
+  const eventBuilderTokens = useMemo(
+    () => eventSelectedBuilderIndices.map((idx) => eventShuffledTokenBank[idx]).filter((token): token is string => Boolean(token)),
+    [eventSelectedBuilderIndices, eventShuffledTokenBank]
+  );
   const dominantBranch: BranchId = (Object.entries(branchScore).sort((a, b) => b[1] - a[1])[0]?.[0] ??
     "strategist") as BranchId;
   const dominantEndingRoute: EndingRouteId = endingRouteByBranch[dominantBranch];
@@ -2960,32 +4805,229 @@ export default function App() {
     activeForestStep?.sceneByBranch
       ? activeForestStep.sceneByBranch[dominantBranch]
       : activeForestStep?.scene;
+  const visibleStepOptions = useMemo(() => {
+    const sourceOptions = activeForestStep?.options ?? [];
+    if (!sourceOptions.length) {
+      return [];
+    }
+    if (displayOptionOrder.length !== sourceOptions.length) {
+      return sourceOptions;
+    }
+    return displayOptionOrder.map((sourceIndex) => sourceOptions[sourceIndex]).filter((item): item is string => typeof item === "string");
+  }, [activeForestStep?.options, displayOptionOrder]);
   const builderTokens = useMemo(
     () => selectedBuilderIndices.map((idx) => shuffledTokenBank[idx]).filter((token): token is string => Boolean(token)),
     [selectedBuilderIndices, shuffledTokenBank]
   );
+  const sfxSource = useMemo(
+    () => ({
+      tap: require("./assets/sfx/tap.wav"),
+      swipe: require("./assets/sfx/swipe.wav"),
+      step_success: require("./assets/sfx/success.wav"),
+      quest_finish_positive: require("./assets/sfx/finish_positive.wav"),
+      quest_finish_negative: require("./assets/sfx/finish_negative.wav"),
+    }),
+    []
+  );
+
+  const playSfx = async (cue: keyof typeof sfxSource) => {
+    if (!soundEnabled) {
+      return;
+    }
+    const now = Date.now();
+    const minGapByCue: Partial<Record<keyof typeof sfxSource, number>> = {
+      tap: 60,
+      swipe: 90,
+      step_success: 140,
+    };
+    const last = soundCooldownRef.current[cue] ?? 0;
+    if (now - last < (minGapByCue[cue] ?? 0)) {
+      return;
+    }
+    soundCooldownRef.current[cue] = now;
+    const loaded = soundPoolRef.current[cue];
+    if (!loaded) {
+      return;
+    }
+    try {
+      await loaded.replayAsync();
+    } catch {
+      // Ignore transient playback errors to keep gameplay smooth.
+    }
+  };
 
   const withUserAnalytics = (user: AuthUser, nowIso: string) => {
     if (user.analytics) {
+      user.analytics.counters.answersCorrect ??= 0;
+      user.analytics.counters.answersIncorrect ??= 0;
+      user.analytics.answerByErrorType ??= {};
+      user.analytics.answerByTactic ??= {};
       return user.analytics;
     }
     return buildDefaultAnalytics(nowIso);
   };
 
+  useEffect(() => {
+    let disposed = false;
+
+    const setupSounds = async () => {
+      if (!soundEnabled) {
+        const loaded = Object.values(soundPoolRef.current);
+        for (const sound of loaded) {
+          try {
+            await sound?.unloadAsync();
+          } catch {
+            // Ignore unload failures.
+          }
+        }
+        soundPoolRef.current = {};
+        return;
+      }
+
+      try {
+        await Audio.setAudioModeAsync({
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+        });
+      } catch {
+        // Keep UX resilient if platform does not support all audio flags.
+      }
+
+      const cues = Object.keys(sfxSource) as Array<keyof typeof sfxSource>;
+      for (const cue of cues) {
+        if (disposed || soundPoolRef.current[cue]) {
+          continue;
+        }
+        try {
+          const { sound } = await Audio.Sound.createAsync(sfxSource[cue], {
+            shouldPlay: false,
+            volume: cue.includes("finish") ? 0.46 : 0.36,
+          });
+          soundPoolRef.current[cue] = sound;
+        } catch {
+          // If one cue fails, others should still load.
+        }
+      }
+    };
+
+    setupSounds().catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [sfxSource, soundEnabled]);
+
+  useEffect(() => {
+    return () => {
+      const loaded = Object.values(soundPoolRef.current);
+      loaded.forEach((sound) => {
+        sound?.unloadAsync().catch(() => undefined);
+      });
+      soundPoolRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
+    if (openAchievementId && !unlockedAchievements.includes(openAchievementId)) {
+      setOpenAchievementId(null);
+    }
+  }, [openAchievementId, unlockedAchievements]);
+
+  useEffect(() => {
+    const duplicates = runGlobalOptionUniquenessAudit();
+    if (duplicates.length) {
+      console.error("[content-audit] Duplicate options found:", duplicates.slice(0, 20));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserEmail || !isProfileHydrated) {
+      return;
+    }
+    if (reactivationCheckDoneForRef.current === currentUserEmail) {
+      return;
+    }
+    reactivationCheckDoneForRef.current = currentUserEmail;
+
+    if (!welcomeEnergyGranted) {
+      setWelcomeEnergyGranted(true);
+      grantEnergy(ENERGY_WELCOME_BONUS, "welcome_bonus");
+      setPromoInfo(`Добро пожаловать: +${ENERGY_WELCOME_BONUS} энергии.`);
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    if (!lastSeenAt) {
+      setLastSeenAt(nowIso);
+      return;
+    }
+
+    const daysAway = Math.floor((Date.now() - Date.parse(lastSeenAt)) / (24 * 60 * 60 * 1000));
+    if (daysAway >= 30) {
+      grantEnergy(ENERGY_REACTIVATION_30D_BONUS, "reactivation_30d");
+      setPromoInfo(`С возвращением! +${ENERGY_REACTIVATION_30D_BONUS} энергии за 30+ дней.`);
+    } else if (daysAway >= 14) {
+      grantEnergy(ENERGY_REACTIVATION_14D_BONUS, "reactivation_14d");
+      setPromoInfo(`С возвращением! +${ENERGY_REACTIVATION_14D_BONUS} энергии за 14+ дней.`);
+    } else if (daysAway >= 7) {
+      grantEnergy(ENERGY_REACTIVATION_7D_BONUS, "reactivation_7d");
+      setPromoInfo(`С возвращением! +${ENERGY_REACTIVATION_7D_BONUS} энергии за 7+ дней.`);
+    }
+    setLastSeenAt(nowIso);
+  }, [currentUserEmail, isProfileHydrated, lastSeenAt, welcomeEnergyGranted]);
+
   const refreshAnalyticsSnapshot = async () => {
     const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) {
       setAnalyticsSnapshot({});
+      setAdminUsers([]);
       return;
     }
     const parsed = JSON.parse(raw) as AuthStore;
     const next: Record<string, UserAnalytics> = {};
+    const nextAdminUsers: AdminUserView[] = [];
     Object.values(parsed.users).forEach((user) => {
       if (user.analytics) {
         next[user.email] = user.analytics;
+        nextAdminUsers.push({
+          email: user.email,
+          role: user.role ?? "USER",
+          xp: typeof user.profile.xp === "number" ? user.profile.xp : 0,
+          energy: typeof user.profile.energy === "number" ? user.profile.energy : 0,
+          analytics: user.analytics,
+        });
       }
     });
     setAnalyticsSnapshot(next);
+    setAdminUsers(nextAdminUsers.sort((a, b) => (a.analytics.lastSeenAt < b.analytics.lastSeenAt ? 1 : -1)));
+  };
+
+  const refreshFriendProfiles = async (emails: string[] = friendEmails) => {
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) {
+      setFriendProfiles({});
+      return;
+    }
+    const store = JSON.parse(raw) as AuthStore;
+    const next: Record<string, Pick<UserProfile, "displayName" | "aboutMe" | "xp" | "energy" | "completedCount" | "conflictPrimaryStyle">> = {};
+    emails.forEach((email) => {
+      const target = store.users[email];
+      if (!target) return;
+      next[email] = {
+        displayName: sanitizeShortText(target.profile.displayName, "Игрок", 60),
+        aboutMe: sanitizeShortText(target.profile.aboutMe, "Тренирует навыки общения.", 180),
+        xp: typeof target.profile.xp === "number" ? target.profile.xp : 0,
+        energy: typeof target.profile.energy === "number" ? target.profile.energy : 0,
+        completedCount: typeof target.profile.completedCount === "number" ? target.profile.completedCount : 0,
+        conflictPrimaryStyle: sanitizeConflictStyle(target.profile.conflictPrimaryStyle),
+      };
+    });
+    setFriendProfiles(next);
+    if (openedFriendEmail && !next[openedFriendEmail]) {
+      setOpenedFriendEmail(null);
+    }
+    if (selectedFriendEmail && !next[selectedFriendEmail]) {
+      setSelectedFriendEmail("");
+    }
   };
 
   const trackAnalyticsEvent = async (
@@ -3027,9 +5069,28 @@ export default function App() {
     if (type === "course_complete") analytics.counters.courseCompletions += 1;
     if (type === "quest_start") analytics.counters.questStarts += 1;
     if (type === "quest_complete") analytics.counters.questCompletions += 1;
+    if (type === "stage_start") analytics.counters.stageStarts += 1;
+    if (type === "stage_complete") analytics.counters.stageCompletions += 1;
     if (type === "step_fail") analytics.counters.stepFails += 1;
     if (type === "penalty_applied") analytics.counters.penalties += 1;
     if (type === "drop_off") analytics.counters.dropOffs += 1;
+    if (type === "answer_correct") analytics.counters.answersCorrect += 1;
+    if (type === "answer_incorrect") analytics.counters.answersIncorrect += 1;
+    if (type === "answer_correct" || type === "answer_incorrect") {
+      const details = payload.details ?? "";
+      const typeMatch = details.match(/type:([^;]+)/);
+      const tacticMatch = details.match(/tactic:([^;]+)/);
+      const parsedType = typeMatch?.[1]?.trim();
+      const parsedTactic = tacticMatch?.[1]?.trim();
+      if (parsedType) {
+        analytics.answerByErrorType ??= {};
+        analytics.answerByErrorType[parsedType] = (analytics.answerByErrorType[parsedType] ?? 0) + 1;
+      }
+      if (parsedTactic && parsedTactic !== "n/a") {
+        analytics.answerByTactic ??= {};
+        analytics.answerByTactic[parsedTactic] = (analytics.answerByTactic[parsedTactic] ?? 0) + 1;
+      }
+    }
     if (type === "session_end") {
       analytics.totalSessions += 1;
       const matched = payload.details?.match(/duration_sec:(\d+)/);
@@ -3072,11 +5133,37 @@ export default function App() {
     if (activeForestStep?.type === "builder") {
       setShuffledTokenBank(shuffleWords(activeForestStep.tokenBank ?? []));
       setSelectedBuilderIndices([]);
+      setDisplayOptionOrder([]);
       return;
     }
     setShuffledTokenBank([]);
     setSelectedBuilderIndices([]);
+    const optionCount = activeForestStep?.options?.length ?? 0;
+    setDisplayOptionOrder(optionCount > 0 ? shuffleIndices(optionCount) : []);
   }, [activeForestStep]);
+
+  useEffect(() => {
+    closeQuestHintBubble();
+  }, [forestStepIndex, forestStarted]);
+
+  useEffect(() => {
+    return () => {
+      if (questHintTimeoutRef.current) {
+        clearTimeout(questHintTimeoutRef.current);
+        questHintTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeEventStep?.type === "builder") {
+      setEventShuffledTokenBank(shuffleWords(activeEventStep.tokenBank ?? []));
+      setEventSelectedBuilderIndices([]);
+      return;
+    }
+    setEventShuffledTokenBank([]);
+    setEventSelectedBuilderIndices([]);
+  }, [activeEventStep]);
 
   useEffect(() => {
     if (!allowedStoryDifficulties.includes(selectedDifficulty)) {
@@ -3119,6 +5206,52 @@ export default function App() {
   }, [activeTab, currentUserEmail, isProfileHydrated]);
 
   useEffect(() => {
+    if (!currentUserEmail || !isProfileHydrated) {
+      setFriendProfiles({});
+      return;
+    }
+    refreshFriendProfiles().catch(() => undefined);
+  }, [currentUserEmail, isProfileHydrated, friendEmails]);
+
+  useEffect(() => {
+    const from = animatedXp;
+    const to = xp;
+    if (from === to) {
+      return;
+    }
+    const startedAt = Date.now();
+    const duration = 1000;
+    const timer = setInterval(() => {
+      const progress = Math.min(1, (Date.now() - startedAt) / duration);
+      const value = Math.round(from + (to - from) * progress);
+      setAnimatedXp(value);
+      if (progress >= 1) {
+        clearInterval(timer);
+      }
+    }, 40);
+    return () => clearInterval(timer);
+  }, [xp]);
+
+  useEffect(() => {
+    const from = animatedEnergy;
+    const to = energy;
+    if (from === to) {
+      return;
+    }
+    const startedAt = Date.now();
+    const duration = 1000;
+    const timer = setInterval(() => {
+      const progress = Math.min(1, (Date.now() - startedAt) / duration);
+      const value = Math.round(from + (to - from) * progress);
+      setAnimatedEnergy(value);
+      if (progress >= 1) {
+        clearInterval(timer);
+      }
+    }, 40);
+    return () => clearInterval(timer);
+  }, [energy]);
+
+  useEffect(() => {
     if (!successPulseTick) {
       return;
     }
@@ -3141,13 +5274,57 @@ export default function App() {
   useEffect(() => {
     const bootstrapAuth = async () => {
       try {
+        if (isServerAuth) {
+          const token = await AsyncStorage.getItem(authApi.storageKey);
+          if (!token) {
+            setAuthReady(true);
+            return;
+          }
+          try {
+            const me = await authApi.me(token);
+            applyServerUserSnapshot(me.user.email, (me.user.role ?? "USER") as UserRole, me.user.profile, me.economy);
+            sessionStartedAtRef.current = Date.now();
+          } catch {
+            await AsyncStorage.removeItem(authApi.storageKey);
+          } finally {
+            setAuthReady(true);
+            return;
+          }
+        }
         const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
         if (!raw) {
+          const nowIso = new Date().toISOString();
+          const seededStore: AuthStore = {
+            users: createSeedUsers(nowIso),
+            currentEmail: null,
+          };
+          await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(seededStore));
           setAuthReady(true);
           return;
         }
 
         const parsed = JSON.parse(raw) as AuthStore;
+        const nowIso = new Date().toISOString();
+        parsed.users[ADMIN_EMAIL] ??= {
+          email: ADMIN_EMAIL,
+          password: ADMIN_PASSWORD,
+          role: "ADMIN",
+          profile: buildDefaultProfile(),
+          analytics: buildDefaultAnalytics(nowIso),
+        };
+        parsed.users[USER_EMAIL] ??= {
+          email: USER_EMAIL,
+          password: USER_PASSWORD,
+          role: "USER",
+          profile: buildDefaultProfile(),
+          analytics: buildDefaultAnalytics(nowIso),
+        };
+        Object.values(parsed.users).forEach((entry) => {
+          if (!entry.role) {
+            entry.role = entry.email === ADMIN_EMAIL ? "ADMIN" : "USER";
+          }
+        });
+        await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(parsed));
         if (!parsed.currentEmail) {
           setAuthReady(true);
           return;
@@ -3160,14 +5337,32 @@ export default function App() {
         }
 
         setCurrentUserEmail(user.email);
+        setCurrentUserRole(user.role ?? "USER");
+        const safeDisplayName = sanitizeShortText(user.profile.displayName, "Герой леса", 60);
+        setDisplayName(safeDisplayName);
+        setProfileNameDraft(safeDisplayName);
+        setAvatarUri(sanitizeAvatarUri(user.profile.avatarUri));
+        setProfileGender(sanitizeProfileGender((user.profile as Partial<UserProfile>).gender));
+        setIsAdult18Plus(Boolean((user.profile as Partial<UserProfile>).isAdult18Plus ?? true));
+        setProfileSetupDone(Boolean(user.profile.profileSetupDone));
+        setAboutMe(sanitizeShortText(user.profile.aboutMe, "Тренирую диалог и границы в сложных разговорах.", 180));
+        setFriendEmails(sanitizeStringArray(user.profile.friendEmails));
+        setSelectedFriendEmail("");
+        setOpenedFriendEmail(null);
         setXp(user.profile.xp);
+        setEnergy(typeof user.profile.energy === "number" ? user.profile.energy : 120);
         setCompletedCount(user.profile.completedCount);
         setLastFeedback(user.profile.lastFeedback);
         setSelectedQuestId(user.profile.selectedQuestId);
-        setEventJoined(user.profile.eventJoined);
+        setEventProgress(sanitizeEventProgress(user.profile.eventProgress, (user.profile as { eventJoined?: boolean }).eventJoined));
         setSelectedDifficulty(user.profile.selectedDifficulty);
         setSelectedStory(user.profile.selectedStory);
-        setActiveTab(user.profile.activeTab);
+        setStartedStoryIds(
+          sanitizeStringArray((user.profile as Partial<UserProfile>).startedStoryIds).filter((id): id is QuestStory =>
+            storyConfigs.some((story) => story.id === id)
+          )
+        );
+        setActiveTab((user.role ?? "USER") === "ADMIN" ? user.profile.activeTab : user.profile.activeTab === "admin" ? "map" : user.profile.activeTab);
         const safePrimaryStyle = sanitizeConflictStyle(user.profile.conflictPrimaryStyle);
         setConflictPrimaryStyle(safePrimaryStyle);
         setConflictSecondaryStyles(sanitizeSecondaryConflictStyles(user.profile.conflictSecondaryStyles, safePrimaryStyle));
@@ -3176,6 +5371,19 @@ export default function App() {
         setActiveProgramMode(user.profile.activeProgramMode ?? "story");
         setUnlockedEndings(sanitizeStringArray(user.profile.unlockedEndings));
         setUnlockedAchievements(sanitizeStringArray(user.profile.unlockedAchievements));
+        setPracticeStats(sanitizePracticeStats(user.profile.practiceStats));
+        setQuestRatingStats(sanitizeQuestRatingStats(user.profile.questRatingStats));
+        setSoundEnabled(typeof user.profile.soundEnabled === "boolean" ? user.profile.soundEnabled : true);
+        setClaimedDailyEnergyAt(user.profile.claimedDailyEnergyAt ?? null);
+        setWelcomeEnergyGranted(Boolean(user.profile.welcomeEnergyGranted));
+        setGrantedPerfectStageIds(sanitizeStringArray(user.profile.grantedPerfectStageIds));
+        setRedeemedPromoCodes(sanitizeStringArray(user.profile.redeemedPromoCodes));
+        setReferralInvitesCompleted(typeof user.profile.referralInvitesCompleted === "number" ? user.profile.referralInvitesCompleted : 0);
+        setUnlockedPaidStageKeys(sanitizeStringArray(user.profile.unlockedPaidStageKeys));
+        setEnergyTransfersSentToday(typeof user.profile.energyTransfersSentToday === "number" ? user.profile.energyTransfersSentToday : 0);
+        setEnergyTransfersSentWeek(typeof user.profile.energyTransfersSentWeek === "number" ? user.profile.energyTransfersSentWeek : 0);
+        setLastEnergyTransferAt(user.profile.lastEnergyTransferAt ?? null);
+        setLastSeenAt(user.profile.lastSeenAt ?? null);
         setShowDiagnosticResult(false);
         setIsProfileHydrated(true);
         sessionStartedAtRef.current = Date.now();
@@ -3190,11 +5398,60 @@ export default function App() {
     };
 
     bootstrapAuth();
-  }, []);
+  }, [isServerAuth]);
 
   useEffect(() => {
     const persistProfile = async () => {
       if (!currentUserEmail || !isProfileHydrated) {
+        return;
+      }
+
+      if (isServerAuth) {
+        try {
+          const token = await AsyncStorage.getItem(authApi.storageKey);
+          if (!token) {
+            return;
+          }
+          await authApi.syncProfile(token, {
+            displayName,
+            avatarUri,
+            gender: profileGender,
+            isAdult18Plus,
+            profileSetupDone,
+            aboutMe,
+            friendEmails,
+            completedCount,
+            lastFeedback,
+            selectedQuestId,
+            eventProgress,
+            selectedDifficulty,
+            selectedStory,
+            startedStoryIds,
+            activeProgramMode,
+            activeTab,
+            conflictPrimaryStyle,
+            conflictSecondaryStyles,
+            diagnosticCompleted,
+            selectedCourseId,
+            unlockedEndings,
+            unlockedAchievements,
+            practiceStats,
+            questRatingStats,
+            soundEnabled,
+            claimedDailyEnergyAt,
+            welcomeEnergyGranted,
+            grantedPerfectStageIds,
+            redeemedPromoCodes,
+            referralInvitesCompleted,
+            unlockedPaidStageKeys,
+            energyTransfersSentToday,
+            energyTransfersSentWeek,
+            lastEnergyTransferAt,
+            lastSeenAt: new Date().toISOString(),
+          });
+        } catch {
+          // keep local UX resilient on temporary backend errors
+        }
         return;
       }
 
@@ -3204,7 +5461,7 @@ export default function App() {
         const store: AuthStore = raw
           ? (JSON.parse(raw) as AuthStore)
           : {
-              users: {},
+              users: createSeedUsers(new Date().toISOString()),
               currentEmail: null,
             };
         const user = store.users[currentUserEmail];
@@ -3213,13 +5470,22 @@ export default function App() {
         }
 
         user.profile = {
+          displayName,
+          avatarUri,
+          gender: profileGender,
+          isAdult18Plus,
+          profileSetupDone,
+          aboutMe,
+          friendEmails,
           xp,
+          energy,
           completedCount,
           lastFeedback,
           selectedQuestId,
-          eventJoined,
+          eventProgress,
           selectedDifficulty,
           selectedStory,
+          startedStoryIds,
           activeProgramMode,
           activeTab,
           conflictPrimaryStyle,
@@ -3228,6 +5494,19 @@ export default function App() {
           selectedCourseId,
           unlockedEndings,
           unlockedAchievements,
+          practiceStats,
+          questRatingStats,
+          soundEnabled,
+          claimedDailyEnergyAt,
+          welcomeEnergyGranted,
+          grantedPerfectStageIds,
+          redeemedPromoCodes,
+          referralInvitesCompleted,
+          unlockedPaidStageKeys,
+          energyTransfersSentToday,
+          energyTransfersSentWeek,
+          lastEnergyTransferAt,
+          lastSeenAt: new Date().toISOString(),
         };
         store.currentEmail = currentUserEmail;
         await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(store));
@@ -3239,21 +5518,43 @@ export default function App() {
     persistProfile();
   }, [
     activeTab,
+    displayName,
+    avatarUri,
+    profileGender,
+    isAdult18Plus,
+    profileSetupDone,
+    aboutMe,
     completedCount,
     conflictPrimaryStyle,
     conflictSecondaryStyles,
     currentUserEmail,
-    eventJoined,
+    friendEmails,
+    eventProgress,
     isProfileHydrated,
     lastFeedback,
     selectedDifficulty,
     selectedQuestId,
     selectedStory,
+    startedStoryIds,
     activeProgramMode,
     diagnosticCompleted,
     selectedCourseId,
     unlockedEndings,
     unlockedAchievements,
+    practiceStats,
+    questRatingStats,
+    soundEnabled,
+    claimedDailyEnergyAt,
+    welcomeEnergyGranted,
+    grantedPerfectStageIds,
+    redeemedPromoCodes,
+    referralInvitesCompleted,
+    unlockedPaidStageKeys,
+    energyTransfersSentToday,
+    energyTransfersSentWeek,
+    lastEnergyTransferAt,
+    lastSeenAt,
+    energy,
     xp,
   ]);
 
@@ -3266,8 +5567,11 @@ export default function App() {
 
     setCompletedCount((prev) => prev + 1);
     setXp((prev) => prev + selectedQuest.reward);
+    grantEnergy(ENERGY_REFLECTION_BONUS, "reflection_task");
     setLastFeedback(
-      `Хороший ход. Ты добавила осознанность в ${selectedQuest.biome}. ${followUpHints[(completedCount + 1) % followUpHints.length]}`
+      `Хороший ход. Ты добавила осознанность в ${selectedQuest.biome}. +${ENERGY_REFLECTION_BONUS} энергии за рефлексию. ${
+        followUpHints[(completedCount + 1) % followUpHints.length]
+      }`
     );
     setAnswer("");
     setActiveTab("feedback");
@@ -3278,11 +5582,245 @@ export default function App() {
     setSelectedMultiple([]);
     setSelectedBuilderIndices([]);
     setStepErrorCount(0);
-    setShowHint(false);
+    closeQuestHintBubble();
+    const optionCount = activeForestStep?.options?.length ?? 0;
+    if (activeForestStep?.type !== "builder" && optionCount > 0) {
+      setDisplayOptionOrder(shuffleIndices(optionCount));
+    } else {
+      setDisplayOptionOrder([]);
+    }
+  };
+  const resetStageAnalytics = () => {
+    setStageTacticUsage({
+      strategist: 0,
+      empath: 0,
+      boundary: 0,
+      challenger: 0,
+      architect: 0,
+    });
+    setStageForgivenErrorByType({});
+  };
+
+  const buildStageSummary = (stageIdx: number, durationSec: number) => {
+    const totalAnswers = Object.values(stageTacticUsage).reduce((acc, value) => acc + value, 0);
+    const forgivenErrors = Object.values(stageForgivenErrorByType).reduce((acc, value) => acc + value, 0);
+    const topBranch = buildBranchScaleData(stageTacticUsage).sort((a, b) => b.value - a.value)[0];
+    const topTacticName = topBranch ? branchScaleUi[topBranch.branch].label : "смешанный стиль";
+    const conflictTrend =
+      forgivenErrors === 0
+        ? "Этап прошел ровно: ты близко к договоренности."
+        : forgivenErrors <= Math.max(1, Math.round(totalAnswers * 0.25))
+          ? "Есть трение, но ты держишь линию к решению."
+          : "Напряжение выросло: риск конфликта пока выше, чем риск договоренности.";
+    setStageProgressSummary({
+      stageIdx,
+      durationSec,
+      forgivenErrorByType: stageForgivenErrorByType,
+      tacticUsage: stageTacticUsage,
+      narrative: `${conflictTrend} Ведущий подход этапа: ${topTacticName}.`,
+    });
+    resetStageAnalytics();
+  };
+  const stageAnalyticsSuffix = () => {
+    const forgivenTotal = Object.values(stageForgivenErrorByType).reduce((acc, value) => acc + value, 0);
+    const tacticTotal = Object.values(stageTacticUsage).reduce((acc, value) => acc + value, 0);
+    const topTactic = buildBranchScaleData(stageTacticUsage).sort((a, b) => b.value - a.value)[0];
+    return `forgiven_total:${forgivenTotal};tactic_answers:${tacticTotal};top_tactic:${topTactic?.branch ?? "n/a"};top_tactic_pct:${topTactic?.percent ?? 0}`;
+  };
+
+  const resetEventStepUi = () => {
+    setEventSelectedSingle(null);
+    setEventSelectedMultiple([]);
+    setEventSelectedBuilderIndices([]);
+    setEventWrongSingleIndex(null);
+    setEventStepErrorCount(0);
+    setEventShowHint(false);
+  };
+
+  const startSeasonEvent = () => {
+    setEventProgress((prev) => ({
+      ...prev,
+      eventId: seasonalEventMvp.id,
+      joined: true,
+      started: true,
+      finished: false,
+      rewardClaimed: false,
+      currentStep: 0,
+      completedStepIds: [],
+      xpEarned: 0,
+      energyEarned: 0,
+      errors: 0,
+      penalties: 0,
+    }));
+    resetEventStepUi();
+    setEventStepMessage("Сезон запущен. Пройди 10 сцен и забери артефакт.");
+    trackAnalyticsEvent("event_join", { details: `event:${seasonalEventMvp.id}` }).catch(() => undefined);
+  };
+
+  const claimSeasonEventReward = () => {
+    if (!eventProgress.finished || eventProgress.rewardClaimed) {
+      return;
+    }
+    setXp((prev) => prev + seasonalEventMvp.completionReward.xp);
+    grantEnergy(seasonalEventMvp.completionReward.energy, `event_complete:${seasonalEventMvp.id}`);
+    setEventProgress((prev) => ({
+      ...prev,
+      rewardClaimed: true,
+    }));
+    setEventStepMessage(
+      `Награда выдана: +${seasonalEventMvp.completionReward.xp} XP, +${seasonalEventMvp.completionReward.energy} энергии.`
+    );
+    trackAnalyticsEvent("event_reward_claim", { details: `event:${seasonalEventMvp.id}` }).catch(() => undefined);
+  };
+
+  const passSeasonEventStep = (isCorrectOnSubmit: boolean) => {
+    if (!activeEventStep) {
+      return;
+    }
+    setXp((prev) => prev + activeEventStep.rewardXp);
+    grantEnergy(activeEventStep.rewardEnergy, `event_step:${activeEventStep.id}`);
+    setEventProgress((prev) => {
+      const nextStep = Math.min(eventSteps.length, prev.currentStep + 1);
+      const nextCompleted = prev.completedStepIds.includes(activeEventStep.id)
+        ? prev.completedStepIds
+        : [...prev.completedStepIds, activeEventStep.id];
+      const finished = nextStep >= eventSteps.length;
+      if (finished) {
+        trackAnalyticsEvent("event_complete", {
+          details: `event:${seasonalEventMvp.id};errors:${prev.errors};penalties:${prev.penalties}`,
+        }).catch(() => undefined);
+      }
+      return {
+        ...prev,
+        started: true,
+        joined: true,
+        currentStep: nextStep,
+        completedStepIds: nextCompleted,
+        xpEarned: prev.xpEarned + activeEventStep.rewardXp,
+        energyEarned: prev.energyEarned + activeEventStep.rewardEnergy,
+        finished,
+      };
+    });
+    setEventStepMessage(
+      isCorrectOnSubmit
+        ? `Отлично: +${activeEventStep.rewardXp} XP и +${activeEventStep.rewardEnergy} энергии.`
+        : `Шаг принят со штрафом, но ты идешь дальше: +${activeEventStep.rewardXp} XP и +${activeEventStep.rewardEnergy} энергии.`
+    );
+    trackAnalyticsEvent("event_step_pass", {
+      details: `event:${seasonalEventMvp.id};step:${activeEventStep.id};correct:${isCorrectOnSubmit ? "yes" : "no"}`,
+      stepIndex: eventProgress.currentStep,
+    }).catch(() => undefined);
+    resetEventStepUi();
+  };
+
+  const evaluateSeasonEventStep = () => {
+    if (!activeEventStep || eventProgress.finished) {
+      return;
+    }
+
+    let isCorrect = false;
+    if (activeEventStep.type === "single") {
+      if (eventSelectedSingle === null) {
+        setEventStepMessage("Выбери один вариант ответа.");
+        return;
+      }
+      isCorrect = eventSelectedSingle === activeEventStep.correctSingle;
+    }
+    if (activeEventStep.type === "multiple") {
+      const sortedSelected = [...eventSelectedMultiple].sort((a, b) => a - b);
+      const sortedCorrect = [...(activeEventStep.correctMultiple ?? [])].sort((a, b) => a - b);
+      if (!sortedSelected.length) {
+        setEventStepMessage("Выбери варианты для проверки.");
+        return;
+      }
+      isCorrect = sortedSelected.length === sortedCorrect.length && sortedSelected.every((value, idx) => value === sortedCorrect[idx]);
+    }
+    if (activeEventStep.type === "builder") {
+      const expected = activeEventStep.targetBuilder ?? [];
+      if (!expected.length) {
+        setEventStepMessage("Шаг временно недоступен.");
+        return;
+      }
+      isCorrect = eventBuilderTokens.join(" ").trim() === expected.join(" ").trim();
+      if (!eventBuilderTokens.length) {
+        setEventStepMessage("Собери фразу из слов.");
+        return;
+      }
+    }
+
+    if (isCorrect) {
+      passSeasonEventStep(true);
+      return;
+    }
+
+    setEventProgress((prev) => ({ ...prev, errors: prev.errors + 1 }));
+    trackAnalyticsEvent("event_step_fail", {
+      details: `event:${seasonalEventMvp.id};step:${activeEventStep.id};try:${eventStepErrorCount + 1}`,
+      stepIndex: eventProgress.currentStep,
+    }).catch(() => undefined);
+
+    if (eventStepErrorCount === 0) {
+      if (activeEventStep.type === "single" && eventSelectedSingle !== null) {
+        setEventWrongSingleIndex(eventSelectedSingle);
+      }
+      setEventStepErrorCount(1);
+      setEventStepMessage("Первая ошибка: подсветила неудачный ответ. Попробуй еще раз.");
+      return;
+    }
+
+    const eventPenalty = 5;
+    setXp((prev) => Math.max(0, prev - eventPenalty));
+    setEventProgress((prev) => ({ ...prev, penalties: prev.penalties + 1 }));
+    passSeasonEventStep(false);
+  };
+
+  const openStageFromRoad = async (stageIdx: number) => {
+    const startIdx = stageStartIndices[stageIdx];
+    if (startIdx < 0) {
+      return;
+    }
+    const stageKey = `${activeCampaignId}:${stageIdx}`;
+    const isPaidStage = stageIdx + 1 > FREE_STAGES_PER_CAMPAIGN;
+    if (isPaidStage && !unlockedPaidStageKeys.includes(stageKey)) {
+      if (economyMode === "server") {
+        try {
+          const snapshot = await economyApi.unlockStage(activeCampaignId, stageIdx);
+          applyEconomySnapshot(snapshot);
+          setUnlockedPaidStageKeys((prev) => [...prev, stageKey]);
+          setPromoInfo("Этап открыт через сервер.");
+        } catch {
+          setStepMessage("Не удалось открыть этап через сервер.");
+          return;
+        }
+      } else {
+      if (!spendEnergy(currentStageCost, `stage_unlock:${stageKey}`)) {
+        return;
+      }
+      setUnlockedPaidStageKeys((prev) => [...prev, stageKey]);
+      setPromoInfo(`Этап открыт за ${currentStageCost} энергии.`);
+      }
+    }
+    playSfx("swipe").catch(() => undefined);
+    setForestStarted(true);
+    setForestFinished(false);
+    setForestStepIndex(startIdx);
+    stageStartedAtRef.current = Date.now();
+    setStepMessage(`Этап ${stageIdx + 1} начат: ${getCampaignBlockArc(activeCampaignId, stageIdx)}.`);
+    setStageProgressSummary(null);
+    setLastStepPraise("");
+    resetStageAnalytics();
+    resetStepUi();
+    trackAnalyticsEvent("stage_start", {
+      courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
+      storyId: activeProgramMode === "story" ? selectedStory : undefined,
+      details: `stage:${stageIdx + 1};steps:${stageStepCounts[stageIdx]}`,
+      stepIndex: startIdx,
+    }).catch(() => undefined);
   };
 
   const startForestQuest = () => {
-    setForestStarted(true);
+    playSfx("swipe").catch(() => undefined);
+    setForestStarted(false);
     setForestFinished(false);
     setForestStepIndex(0);
     setStepMessage("");
@@ -3290,8 +5828,19 @@ export default function App() {
     setPenaltyCount(0);
     setForestXpEarned(0);
     setFirstTrySuccess(0);
+    setStageProgressSummary(null);
+    setQuestFinalSummary(null);
     setLastStepPraise("");
+    setPendingStoryRating(0);
+    setRatingVoteLocked(false);
+    setUnlockedPaidStageKeys([]);
+    stageStartedAtRef.current = null;
     setBranchScore({ strategist: 0, empath: 0, boundary: 0, challenger: 0, architect: 0 });
+    setAnswerBucketUsage([0, 0, 0, 0, 0]);
+    if (activeProgramMode === "story") {
+      setStartedStoryIds((prev) => (prev.includes(selectedStory) ? prev : [...prev, selectedStory]));
+    }
+    resetStageAnalytics();
     resetStepUi();
     setActiveTab("quest");
     trackAnalyticsEvent(activeProgramMode === "course" ? "course_start" : "quest_start", {
@@ -3309,8 +5858,9 @@ export default function App() {
   };
 
   const startCourseQuest = (course: CourseConfig) => {
+    playSfx("swipe").catch(() => undefined);
     activateCourse(course);
-    setForestStarted(true);
+    setForestStarted(false);
     setForestFinished(false);
     setForestStepIndex(0);
     setStepMessage("");
@@ -3318,8 +5868,14 @@ export default function App() {
     setPenaltyCount(0);
     setForestXpEarned(0);
     setFirstTrySuccess(0);
+    setStageProgressSummary(null);
+    setQuestFinalSummary(null);
     setLastStepPraise("");
+    setUnlockedPaidStageKeys([]);
+    stageStartedAtRef.current = null;
     setBranchScore({ strategist: 0, empath: 0, boundary: 0, challenger: 0, architect: 0 });
+    setAnswerBucketUsage([0, 0, 0, 0, 0]);
+    resetStageAnalytics();
     resetStepUi();
     setActiveTab("quest");
     trackAnalyticsEvent("course_start", {
@@ -3330,56 +5886,121 @@ export default function App() {
   };
 
   const finishForestQuest = () => {
+    const performanceTier = detectEndingPerformanceTier(currentForestQuestSteps.length, penaltyCount, firstTrySuccess);
+    const finishCue = performanceTier === "bad" || performanceTier === "harsh" ? "quest_finish_negative" : "quest_finish_positive";
+    playSfx(finishCue).catch(() => undefined);
+    stageStartedAtRef.current = null;
     setForestFinished(true);
     setCompletedCount((prev) => prev + 1);
-    const litRpgEnding = endingNarrativeByRoute(activeCampaignId)[dominantEndingRoute];
+    const extendedEndingId = resolveExtendedEndingForNarrativeCampaign(activeCampaignId, performanceTier, branchScore, answerBucketUsage);
+    const extendedEndingMeta = extendedEndingId ? extendedEndingMetaById[extendedEndingId] : null;
+    const litRpgEnding = buildFinalStoryByOutcome(
+      activeCampaignId,
+      dominantEndingRoute,
+      performanceTier,
+      penaltyCount,
+      extendedEndingMeta?.story
+    );
     const endingId = buildEndingId(activeCampaignId, dominantEndingRoute);
+    const runtimeEndingId = extendedEndingId ? `ending:${activeCampaignId}:${extendedEndingId}` : endingId;
     const achievementId = buildAchievementId(activeCampaignId, dominantEndingRoute);
-    setUnlockedEndings((prev) => (prev.includes(endingId) ? prev : [...prev, endingId]));
+    const scenarioTierIcon = achievementEmojiByCampaignTier[activeCampaignId]?.[performanceTier];
+    const endingIcon: Record<EndingRouteId, string> = {
+      order: scenarioTierIcon ?? "🧭",
+      harmony: scenarioTierIcon ?? "🤝",
+      boundary: scenarioTierIcon ?? "🛡️",
+      breakthrough: scenarioTierIcon ?? "⚡",
+    };
+    const achievementTitle = formatAchievementLabel(achievementId);
+    const achievementDetails = `Награда за финал ${endingRouteName[dominantEndingRoute]} в кампании «${campaignLore[activeCampaignId].title}».`;
+    const performanceLabel: Record<EndingPerformanceTier, string> = {
+      angel: "Ангел",
+      good: "Хороший",
+      normal: "Нормальный",
+      bad: "Плохой",
+      harsh: "Жесть",
+    };
+    setQuestFinalSummary({
+      endingRoute: runtimeEndingId,
+      endingTitle: `${extendedEndingMeta?.label ?? endingRouteName[dominantEndingRoute]} • ${performanceLabel[performanceTier]}`,
+      story: litRpgEnding,
+      achievementId,
+      achievementTitle,
+      achievementDetails,
+      achievementIcon: extendedEndingMeta?.icon ?? endingIcon[dominantEndingRoute],
+    });
+    setUnlockedEndings((prev) => {
+      const withBase = prev.includes(endingId) ? prev : [...prev, endingId];
+      if (!extendedEndingId) {
+        return withBase;
+      }
+      return withBase.includes(runtimeEndingId) ? withBase : [...withBase, runtimeEndingId];
+    });
     setUnlockedAchievements((prev) => (prev.includes(achievementId) ? prev : [...prev, achievementId]));
     setLastFeedback(
       `${activeProgramMode === "course" ? `Курс «${activeCourse.title}»` : `Квест «${activeStoryConfig.label}»`} завершен (${selectedDifficulty} вопросов). Ошибок: ${totalErrors}, штрафов: ${penaltyCount}. ${litRpgEnding}`
     );
+    setPendingStoryRating(0);
+    setRatingVoteLocked(false);
     trackAnalyticsEvent(activeProgramMode === "course" ? "course_complete" : "quest_complete", {
       courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
       storyId: activeProgramMode === "story" ? selectedStory : undefined,
       difficulty: selectedDifficulty,
-      details: `errors:${totalErrors};penalties:${penaltyCount};ending:${endingId}`,
+      details: `errors:${totalErrors};penalties:${penaltyCount};ending:${runtimeEndingId}`,
     }).catch(() => undefined);
-    trackAnalyticsEvent("ending_unlock", { details: `${endingId};${achievementId}` }).catch(() => undefined);
+    trackAnalyticsEvent("ending_unlock", { details: `${runtimeEndingId};${achievementId}` }).catch(() => undefined);
   };
 
-  const applyError = () => {
-    const nextErrorCount = stepErrorCount + 1;
-    setStepErrorCount(nextErrorCount);
-    setTotalErrors((prev) => prev + 1);
-    trackAnalyticsEvent("step_fail", {
+  function inferRecommendedCourseByErrorType(errorType: string): CourseId {
+    if (errorType.includes("challenger")) return "serpentine-diplomat";
+    if (errorType.includes("boundary")) return "boundary-keeper";
+    if (errorType.includes("architect")) return "mirror-of-truth";
+    if (errorType.includes("empath")) return "heart-lines";
+    if (errorType.includes("strategist")) return "office-icebreaker";
+    if (errorType.includes("builder")) return "office-icebreaker";
+    return "heart-lines";
+  }
+
+  const registerAnswerOutcome = (
+    isCorrect: boolean,
+    errorType: string,
+    wrongTactic?: string
+  ) => {
+    setPracticeStats((prev) => {
+      const nextErrorByType = { ...prev.errorByType };
+      const nextWrongTactic = { ...prev.wrongTacticByType };
+      if (!isCorrect) {
+        nextErrorByType[errorType] = (nextErrorByType[errorType] ?? 0) + 1;
+        if (wrongTactic) {
+          nextWrongTactic[wrongTactic] = (nextWrongTactic[wrongTactic] ?? 0) + 1;
+        }
+      }
+
+      const shouldRecommend = !isCorrect && nextErrorByType[errorType] > 7;
+      if (shouldRecommend) {
+        const suggestedCourse = inferRecommendedCourseByErrorType(errorType);
+        setSelectedCourseId(suggestedCourse);
+      }
+
+      return {
+        answersCorrect: prev.answersCorrect + (isCorrect ? 1 : 0),
+        answersIncorrect: prev.answersIncorrect + (isCorrect ? 0 : 1),
+        errorByType: nextErrorByType,
+        wrongTacticByType: nextWrongTactic,
+      };
+    });
+
+    trackAnalyticsEvent(isCorrect ? "answer_correct" : "answer_incorrect", {
       courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
       storyId: activeProgramMode === "story" ? selectedStory : undefined,
       difficulty: selectedDifficulty,
       stepIndex: forestStepIndex,
+      details: `type:${errorType};tactic:${wrongTactic ?? "n/a"}`,
     }).catch(() => undefined);
-
-    if (nextErrorCount >= 2) {
-      const penalty = activeDifficultyConfig.penalty;
-      setPenaltyCount((prev) => prev + 1);
-      setXp((prev) => Math.max(0, prev - penalty));
-      setForestXpEarned((prev) => prev - penalty);
-      trackAnalyticsEvent("penalty_applied", {
-        details: `-${penalty}xp`,
-        courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
-        storyId: activeProgramMode === "story" ? selectedStory : undefined,
-      }).catch(() => undefined);
-      setStepMessage(
-        `Ошибка ${nextErrorCount}/2. Со 2-й ошибки штраф: -${penalty} XP. Попробуй снова.`
-      );
-      return;
-    }
-
-    setStepMessage("Ошибка 1/2. Первая ошибка прощена, штрафа нет. Попробуй ещё раз.");
   };
 
-  const passStep = () => {
+  const passStep = (npcReaction?: string) => {
+    playSfx("step_success").catch(() => undefined);
     const reward = Math.round(activeForestStep.reward * activeDifficultyConfig.rewardMultiplier);
     setSuccessPulseTick((prev) => prev + 1);
     trackAnalyticsEvent("step_pass", {
@@ -3388,6 +6009,7 @@ export default function App() {
       difficulty: selectedDifficulty,
       stepIndex: forestStepIndex,
     }).catch(() => undefined);
+    registerAnswerOutcome(true, activeForestStep.type === "builder" ? "builder_correct" : `${activeForestStep.type}_correct`);
     setXp((prev) => prev + reward);
     setForestXpEarned((prev) => prev + reward);
 
@@ -3396,16 +6018,96 @@ export default function App() {
     }
 
     const isLastStep = forestStepIndex === currentForestQuestSteps.length - 1;
+    const currentStage = stageIndexByStep[forestStepIndex] ?? 0;
+    const nextStepIndex = forestStepIndex + 1;
+    const nextStage = isLastStep ? currentStage : stageIndexByStep[nextStepIndex] ?? currentStage;
+    const isStageBoundary = !isLastStep && nextStage !== currentStage;
     if (isLastStep) {
       setStepMessage(`Квест завершен! За шаг: +${reward} XP.`);
-      setLastStepPraise(`Классный ход! За предыдущее задание: +${reward} XP.`);
+      setLastStepPraise(`${npcReaction ? `${npcReaction} ` : ""}Классный ход! За предыдущее задание: +${reward} XP.`);
       finishForestQuest();
       return;
     }
 
-    setLastStepPraise(`Классный ход! За предыдущее задание: +${reward} XP.`);
-    setStepMessage(`Верно! За шаг: +${reward} XP. Переходим дальше.`);
+    if (isStageBoundary) {
+      const stageDurationSec = stageStartedAtRef.current ? Math.round((Date.now() - stageStartedAtRef.current) / 1000) : 0;
+      stageStartedAtRef.current = null;
+      const perfectStageKey = `${activeCampaignId}:perfect:${currentStage}`;
+      if (stepErrorCount === 0 && !grantedPerfectStageIds.includes(perfectStageKey)) {
+        setGrantedPerfectStageIds((prev) => [...prev, perfectStageKey]);
+        grantEnergy(ENERGY_PERFECT_STAGE_BONUS, `perfect_stage:${currentStage + 1}`);
+      }
+      buildStageSummary(currentStage, stageDurationSec);
+      setLastStepPraise(`${npcReaction ? `${npcReaction} ` : ""}Этап ${currentStage + 1} закрыт. За шаг: +${reward} XP.`);
+      setStepMessage(`Этап завершен. Дальше открыт этап ${nextStage + 1}.`);
+      setForestStepIndex(nextStepIndex);
+      setForestStarted(false);
+      resetStepUi();
+      trackAnalyticsEvent("stage_complete", {
+        courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
+        storyId: activeProgramMode === "story" ? selectedStory : undefined,
+        details: `stage:${currentStage + 1};next:${nextStage + 1};duration_sec:${stageDurationSec};${stageAnalyticsSuffix()}`,
+        stepIndex: forestStepIndex,
+      }).catch(() => undefined);
+      return;
+    }
+
+    setLastStepPraise(`${npcReaction ? `${npcReaction} ` : ""}Классный ход! За предыдущее задание: +${reward} XP.`);
+    setStepMessage(`${npcReaction ? `${npcReaction} ` : ""}Верно! За шаг: +${reward} XP. Переходим дальше.`);
     setForestStepIndex((prev) => prev + 1);
+    resetStepUi();
+  };
+
+  const finalizeIncorrectStepAsAccepted = (isCorrect: boolean, errorType: string, wrongTactic?: string, npcReaction?: string) => {
+    if (isCorrect) {
+      passStep(npcReaction);
+      return;
+    }
+
+    registerAnswerOutcome(false, errorType, wrongTactic);
+    setTotalErrors((prev) => prev + 1);
+
+    const penalty = 5;
+    setPenaltyCount((prev) => prev + 1);
+    setXp((prev) => Math.max(0, prev - penalty));
+    setForestXpEarned((prev) => prev - penalty);
+    trackAnalyticsEvent("penalty_applied", {
+      details: `-${penalty}xp;type:${errorType};tactic:${wrongTactic ?? "n/a"}`,
+      courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
+      storyId: activeProgramMode === "story" ? selectedStory : undefined,
+    }).catch(() => undefined);
+
+    const isLastStep = forestStepIndex === currentForestQuestSteps.length - 1;
+    const currentStage = stageIndexByStep[forestStepIndex] ?? 0;
+    const nextStepIndex = forestStepIndex + 1;
+    const nextStage = isLastStep ? currentStage : stageIndexByStep[nextStepIndex] ?? currentStage;
+    const isStageBoundary = !isLastStep && nextStage !== currentStage;
+    if (isLastStep) {
+      setStepMessage(`${npcReaction ? `${npcReaction} ` : ""}Неверная тактика: -5 XP. Квест завершен.`);
+      setLastStepPraise(`${npcReaction ? `${npcReaction} ` : ""}Шаг засчитан со штрафом. Разбор доступен в профиле.`);
+      finishForestQuest();
+      return;
+    }
+    if (isStageBoundary) {
+      const stageDurationSec = stageStartedAtRef.current ? Math.round((Date.now() - stageStartedAtRef.current) / 1000) : 0;
+      stageStartedAtRef.current = null;
+      buildStageSummary(currentStage, stageDurationSec);
+      setLastStepPraise(`${npcReaction ? `${npcReaction} ` : ""}Этап ${currentStage + 1} закрыт со штрафом. Разбор в профиле.`);
+      setStepMessage(`${npcReaction ? `${npcReaction} ` : ""}Этап завершен со штрафом. Открыт этап ${nextStage + 1}.`);
+      setForestStepIndex(nextStepIndex);
+      setForestStarted(false);
+      resetStepUi();
+      trackAnalyticsEvent("stage_complete", {
+        courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
+        storyId: activeProgramMode === "story" ? selectedStory : undefined,
+        details: `stage:${currentStage + 1};next:${nextStage + 1};penalty:5;duration_sec:${stageDurationSec};${stageAnalyticsSuffix()}`,
+        stepIndex: forestStepIndex,
+      }).catch(() => undefined);
+      return;
+    }
+    setLastStepPraise(`${npcReaction ? `${npcReaction} ` : ""}Шаг засчитан со штрафом. Разбор доступен в профиле.`);
+    setStepMessage(`${npcReaction ? `${npcReaction} ` : ""}Неверная тактика: -5 XP. Идем дальше.`);
+    setForestStepIndex(nextStepIndex);
     resetStepUi();
   };
 
@@ -3416,13 +6118,17 @@ export default function App() {
 
     if (activeForestStep.type === "single") {
       if (selectedSingle === null) {
-        setStepMessage("Выбери один вариант, чтобы проверить шаг.");
+        setStepMessage("Выбери один вариант, чтобы сделать ход.");
         return;
       }
 
-      if (activeForestStep.branchEffects?.[selectedSingle]) {
-        const branch = activeForestStep.branchEffects[selectedSingle];
+      const selectedSourceIndex = displayOptionOrder[selectedSingle] ?? selectedSingle;
+      const npcReaction = activeForestStep.optionNpcReactionByIndex?.[selectedSourceIndex];
+
+      if (activeForestStep.branchEffects?.[selectedSourceIndex]) {
+        const branch = activeForestStep.branchEffects[selectedSourceIndex];
         setBranchScore((prev) => ({ ...prev, [branch]: prev[branch] + 1 }));
+        setStageTacticUsage((prev) => ({ ...prev, [branch]: prev[branch] + 1 }));
         trackAnalyticsEvent("branch_shift", {
           details: `${activeCampaignId}:${branch}`,
           stepIndex: forestStepIndex,
@@ -3430,16 +6136,40 @@ export default function App() {
       }
 
       if (activeForestStep.acceptAny) {
-        passStep();
+        if (selectedSourceIndex >= 0 && selectedSourceIndex <= 4) {
+          setAnswerBucketUsage((prev) => {
+            const next = [...prev] as [number, number, number, number, number];
+            next[selectedSourceIndex] += 1;
+            return next;
+          });
+        }
+        passStep(npcReaction);
         return;
       }
 
-      if (selectedSingle === activeForestStep.correctSingle) {
-        passStep();
+      const isCorrect = selectedSourceIndex === activeForestStep.correctSingle;
+      const selectedTactic = activeForestStep.branchEffects?.[selectedSourceIndex] ?? "single_unknown";
+
+      if (isCorrect) {
+        if (selectedSourceIndex >= 0 && selectedSourceIndex <= 4) {
+          setAnswerBucketUsage((prev) => {
+            const next = [...prev] as [number, number, number, number, number];
+            next[selectedSourceIndex] += 1;
+            return next;
+          });
+        }
+        passStep(npcReaction);
         return;
       }
 
-      applyError();
+      if (selectedSourceIndex >= 0 && selectedSourceIndex <= 4) {
+        setAnswerBucketUsage((prev) => {
+          const next = [...prev] as [number, number, number, number, number];
+          next[selectedSourceIndex] += 1;
+          return next;
+        });
+      }
+      finalizeIncorrectStepAsAccepted(false, `single_${selectedTactic}`, selectedTactic, npcReaction);
       return;
     }
 
@@ -3460,7 +6190,9 @@ export default function App() {
       }
 
       const correct = [...(activeForestStep.correctMultiple ?? [])].sort((a, b) => a - b);
-      const selected = [...selectedMultiple].sort((a, b) => a - b);
+      const selected = selectedMultiple
+        .map((displayIndex) => displayOptionOrder[displayIndex] ?? displayIndex)
+        .sort((a, b) => a - b);
       const isCorrect = correct.every((value, index) => value === selected[index]);
 
       if (isCorrect) {
@@ -3468,7 +6200,7 @@ export default function App() {
         return;
       }
 
-      applyError();
+      finalizeIncorrectStepAsAccepted(false, "multiple_mismatch");
       return;
     }
 
@@ -3487,11 +6219,15 @@ export default function App() {
         return;
       }
 
-      applyError();
+      finalizeIncorrectStepAsAccepted(false, "builder_phrase_mismatch");
     }
   };
 
   const handleStorySelect = (storyId: QuestStory) => {
+    if (!isAdult18Plus && adultOnlyStories.includes(storyId)) {
+      setStepMessage("Этот сценарий откроется после подтверждения 18+. Пока доступна безопасная подборка сюжетов.");
+      return;
+    }
     setActiveProgramMode("story");
     setSelectedStory(storyId);
     if (forestStarted && !forestFinished) {
@@ -3508,6 +6244,112 @@ export default function App() {
     }
   };
 
+  const openStoryPreview = (storyId: QuestStory) => {
+    setStoryPreviewId(storyId);
+  };
+
+  const startStoryFromCard = (storyId: QuestStory) => {
+    if (!isAdult18Plus && adultOnlyStories.includes(storyId)) {
+      setStepMessage("Сюжет 18+ недоступен для профиля младше 18. Выбери другой квест.");
+      return;
+    }
+    playSfx("swipe").catch(() => undefined);
+    setActiveProgramMode("story");
+    setSelectedStory(storyId);
+    setStartedStoryIds((prev) => (prev.includes(storyId) ? prev : [...prev, storyId]));
+    setForestStarted(false);
+    setForestFinished(false);
+    setForestStepIndex(0);
+    setStepMessage("");
+    setTotalErrors(0);
+    setPenaltyCount(0);
+    setForestXpEarned(0);
+    setFirstTrySuccess(0);
+    setQuestFinalSummary(null);
+    setLastStepPraise("");
+    setRatingVoteLocked(false);
+    setPendingStoryRating(0);
+    resetStepUi();
+    setActiveTab("quest");
+  };
+
+  const submitStoryRating = () => {
+    if (activeProgramMode !== "story" || !forestFinished || ratingVoteLocked || pendingStoryRating < 0 || pendingStoryRating > 5) {
+      return;
+    }
+    setQuestRatingStats((prev) => {
+      const target = prev[selectedStory];
+      return {
+        ...prev,
+        [selectedStory]: {
+          sum: target.sum + pendingStoryRating,
+          count: target.count + 1,
+        },
+      };
+    });
+    setRatingVoteLocked(true);
+    setStepMessage(`Спасибо за оценку: ${pendingStoryRating.toFixed(1).replace(".", ",")}★`);
+    trackAnalyticsEvent("answer_correct", {
+      storyId: selectedStory,
+      details: `story_rating:${pendingStoryRating.toFixed(1)}`,
+    }).catch(() => undefined);
+  };
+
+  const pickAvatarFromLibrary = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setPromoInfo("Нужен доступ к галерее, чтобы выбрать аватар.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (result.canceled || !result.assets.length) {
+      return;
+    }
+    setAvatarUri(result.assets[0].uri);
+    setProfileSetupDone(true);
+  };
+
+  const saveProfileIdentity = () => {
+    const nextName = sanitizeShortText(profileNameDraft, "", 60);
+    if (!nextName) {
+      setPromoInfo("Введи имя или ник.");
+      return;
+    }
+    setDisplayName(nextName);
+    setProfileNameDraft(nextName);
+    setProfileSetupDone(true);
+    setPromoInfo("Профиль обновлен.");
+  };
+
+  const clearProfileAvatar = () => {
+    setAvatarUri(null);
+    setPromoInfo("Аватар удален.");
+  };
+
+  const pickAuthAvatarFromLibrary = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setAuthError("Нужен доступ к галерее, чтобы выбрать аватар.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (result.canceled || !result.assets.length) {
+      return;
+    }
+    setAuthAvatarUri(result.assets[0].uri);
+    setAuthError("");
+  };
+
   const handleAuthSubmit = async () => {
     const email = normalizeEmail(authEmail);
     if (!email || !email.includes("@")) {
@@ -3518,17 +6360,96 @@ export default function App() {
       setAuthError("Пароль должен быть не короче 6 символов.");
       return;
     }
+    if (!sanitizeShortText(authNickname, "", 60)) {
+      setAuthMode("register");
+      setAuthError("Для регистрации укажи имя, пол и 18+ в полной форме.");
+      return;
+    }
+    if (authMode === "register" && !sanitizeShortText(authNickname, "", 60)) {
+      setAuthError("Укажи имя или ник для регистрации.");
+      return;
+    }
+
+    if (isServerAuth) {
+      try {
+        let response;
+        if (authMode === "register") {
+          if (authPassword !== authConfirmPassword) {
+            setAuthError("Пароли не совпадают.");
+            return;
+          }
+          response = await authApi.register(email, authPassword, authNickname);
+          await authApi.syncProfile(response.token, {
+            displayName: sanitizeShortText(authNickname, "Игрок", 60),
+            avatarUri: authAvatarUri,
+            gender: authGender,
+            isAdult18Plus: authIsAdult18Plus,
+            profileSetupDone: true,
+          });
+          response = await authApi.login(email, authPassword);
+          setAuthInfo("Аккаунт создан. Вход выполнен автоматически.");
+        } else {
+          response = await authApi.login(email, authPassword);
+        }
+
+        await AsyncStorage.setItem(authApi.storageKey, response.token);
+        applyServerUserSnapshot(response.user.email, (response.user.role ?? "USER") as UserRole, response.user.profile, response.economy);
+        setAuthError("");
+        if (authMode === "login") {
+          setAuthInfo("");
+        }
+        setAuthEmail("");
+        setAuthPassword("");
+        setAuthConfirmPassword("");
+        setAuthNickname("");
+        setAuthAvatarUri(null);
+        sessionStartedAtRef.current = Date.now();
+        await trackAnalyticsEvent(authMode === "register" ? "auth_register" : "auth_login", {
+          details: authMode === "register" ? "server_register" : "server_login",
+        }, email);
+        await trackAnalyticsEvent("session_start", { details: authMode }, email);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Не удалось выполнить вход через сервер.";
+        setAuthError(message);
+        return;
+      }
+    }
 
     try {
       const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+      const nowIso = new Date().toISOString();
       const store: AuthStore = raw
         ? (JSON.parse(raw) as AuthStore)
         : {
-            users: {},
+            users: createSeedUsers(nowIso),
             currentEmail: null,
           };
+      store.users[ADMIN_EMAIL] ??= {
+        email: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD,
+        role: "ADMIN",
+        profile: buildDefaultProfile(),
+        analytics: buildDefaultAnalytics(nowIso),
+      };
+      store.users[USER_EMAIL] ??= {
+        email: USER_EMAIL,
+        password: USER_PASSWORD,
+        role: "USER",
+        profile: buildDefaultProfile(),
+        analytics: buildDefaultAnalytics(nowIso),
+      };
+      Object.values(store.users).forEach((entry) => {
+        if (!entry.role) {
+          entry.role = entry.email === ADMIN_EMAIL ? "ADMIN" : "USER";
+        }
+      });
 
       if (authMode === "register") {
+        if (email === ADMIN_EMAIL) {
+          setAuthError("Регистрация администратора запрещена. Добавь роль вручную через админку.");
+          return;
+        }
         if (authPassword !== authConfirmPassword) {
           setAuthError("Пароли не совпадают.");
           return;
@@ -3538,11 +6459,20 @@ export default function App() {
           return;
         }
 
-        const nowIso = new Date().toISOString();
+        const nickname = sanitizeShortText(authNickname, "", 60);
+        const createdProfile = buildDefaultProfile();
+        if (nickname) {
+          createdProfile.displayName = nickname;
+          createdProfile.profileSetupDone = true;
+        }
+        createdProfile.avatarUri = sanitizeAvatarUri(authAvatarUri);
+        createdProfile.gender = authGender;
+        createdProfile.isAdult18Plus = authIsAdult18Plus;
         store.users[email] = {
           email,
           password: authPassword,
-          profile: buildDefaultProfile(),
+          role: "USER",
+          profile: createdProfile,
           analytics: buildDefaultAnalytics(nowIso),
         };
         setAuthInfo("Аккаунт создан. Вход выполнен автоматически.");
@@ -3563,15 +6493,44 @@ export default function App() {
       await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(store));
 
       setCurrentUserEmail(email);
+      setCurrentUserRole(existingUser.role ?? "USER");
+      const safeDisplayName = sanitizeShortText(existingUser.profile.displayName, "Герой леса", 60);
+      setDisplayName(safeDisplayName);
+      setProfileNameDraft(safeDisplayName);
+      setAvatarUri(sanitizeAvatarUri(existingUser.profile.avatarUri));
+      setProfileGender(sanitizeProfileGender((existingUser.profile as Partial<UserProfile>).gender));
+      setIsAdult18Plus(Boolean((existingUser.profile as Partial<UserProfile>).isAdult18Plus ?? true));
+      setProfileSetupDone(Boolean(existingUser.profile.profileSetupDone));
+      setAboutMe(sanitizeShortText(existingUser.profile.aboutMe, "Тренирую диалог и границы в сложных разговорах.", 180));
+      setFriendEmails(sanitizeStringArray(existingUser.profile.friendEmails));
+      setSelectedFriendEmail("");
+      setOpenedFriendEmail(null);
       setXp(existingUser.profile.xp);
+      setEnergy(typeof existingUser.profile.energy === "number" ? existingUser.profile.energy : 120);
       setCompletedCount(existingUser.profile.completedCount);
       setLastFeedback(existingUser.profile.lastFeedback);
       setSelectedQuestId(existingUser.profile.selectedQuestId);
-      setEventJoined(existingUser.profile.eventJoined);
+      setEventProgress(
+        sanitizeEventProgress(existingUser.profile.eventProgress, (existingUser.profile as { eventJoined?: boolean }).eventJoined)
+      );
       setSelectedDifficulty(existingUser.profile.selectedDifficulty);
       setSelectedStory(existingUser.profile.selectedStory);
+      setStartedStoryIds(
+        sanitizeStringArray((existingUser.profile as Partial<UserProfile>).startedStoryIds).filter((id): id is QuestStory =>
+          storyConfigs.some((story) => story.id === id)
+        )
+      );
       setActiveProgramMode(existingUser.profile.activeProgramMode ?? "story");
-      setActiveTab(existingUser.profile.activeTab);
+      setActiveTab(
+        (existingUser.role ?? "USER") === "ADMIN"
+          ? existingUser.profile.activeTab
+          : existingUser.profile.activeTab === "admin"
+            ? "map"
+            : existingUser.profile.activeTab
+      );
+      if (authMode === "register" && !Boolean(existingUser.profile.profileSetupDone)) {
+        setActiveTab("profile");
+      }
       const safePrimaryStyle = sanitizeConflictStyle(existingUser.profile.conflictPrimaryStyle);
       setConflictPrimaryStyle(safePrimaryStyle);
       setConflictSecondaryStyles(sanitizeSecondaryConflictStyles(existingUser.profile.conflictSecondaryStyles, safePrimaryStyle));
@@ -3579,6 +6538,19 @@ export default function App() {
       setSelectedCourseId(existingUser.profile.selectedCourseId ?? recommendedCourseByConflictStyle[safePrimaryStyle]);
       setUnlockedEndings(sanitizeStringArray(existingUser.profile.unlockedEndings));
       setUnlockedAchievements(sanitizeStringArray(existingUser.profile.unlockedAchievements));
+      setPracticeStats(sanitizePracticeStats(existingUser.profile.practiceStats));
+      setQuestRatingStats(sanitizeQuestRatingStats(existingUser.profile.questRatingStats));
+      setSoundEnabled(typeof existingUser.profile.soundEnabled === "boolean" ? existingUser.profile.soundEnabled : true);
+      setClaimedDailyEnergyAt(existingUser.profile.claimedDailyEnergyAt ?? null);
+      setWelcomeEnergyGranted(Boolean(existingUser.profile.welcomeEnergyGranted));
+      setGrantedPerfectStageIds(sanitizeStringArray(existingUser.profile.grantedPerfectStageIds));
+      setRedeemedPromoCodes(sanitizeStringArray(existingUser.profile.redeemedPromoCodes));
+      setReferralInvitesCompleted(typeof existingUser.profile.referralInvitesCompleted === "number" ? existingUser.profile.referralInvitesCompleted : 0);
+      setUnlockedPaidStageKeys(sanitizeStringArray(existingUser.profile.unlockedPaidStageKeys));
+      setEnergyTransfersSentToday(typeof existingUser.profile.energyTransfersSentToday === "number" ? existingUser.profile.energyTransfersSentToday : 0);
+      setEnergyTransfersSentWeek(typeof existingUser.profile.energyTransfersSentWeek === "number" ? existingUser.profile.energyTransfersSentWeek : 0);
+      setLastEnergyTransferAt(existingUser.profile.lastEnergyTransferAt ?? null);
+      setLastSeenAt(existingUser.profile.lastSeenAt ?? null);
       setShowDiagnosticResult(false);
       setIsProfileHydrated(true);
       setAuthError("");
@@ -3588,6 +6560,8 @@ export default function App() {
       setAuthEmail("");
       setAuthPassword("");
       setAuthConfirmPassword("");
+      setAuthNickname("");
+      setAuthAvatarUri(null);
       sessionStartedAtRef.current = Date.now();
       await trackAnalyticsEvent(authMode === "register" ? "auth_register" : "auth_login", {
         details: authMode === "register" ? "full_form" : "password_login",
@@ -3601,6 +6575,10 @@ export default function App() {
 
   const handleQuickRegister = async () => {
     const email = normalizeEmail(authEmail);
+    if (email === ADMIN_EMAIL) {
+      setAuthError("Админ не регистрируется через форму.");
+      return;
+    }
     if (!email || !email.includes("@")) {
       setAuthError("Введите корректный email для регистрации.");
       return;
@@ -3610,25 +6588,87 @@ export default function App() {
       return;
     }
 
+    if (isServerAuth) {
+      try {
+        const response = await authApi.register(email, authPassword, authNickname);
+        await authApi.syncProfile(response.token, {
+          displayName: sanitizeShortText(authNickname, "Игрок", 60),
+          avatarUri: authAvatarUri,
+          gender: authGender,
+          isAdult18Plus: authIsAdult18Plus,
+          profileSetupDone: true,
+        });
+        const loggedIn = await authApi.login(email, authPassword);
+        await AsyncStorage.setItem(authApi.storageKey, loggedIn.token);
+        applyServerUserSnapshot(loggedIn.user.email, (loggedIn.user.role ?? "USER") as UserRole, loggedIn.user.profile, loggedIn.economy);
+        setAuthError("");
+        setAuthInfo("Аккаунт создан и активирован.");
+        setAuthEmail("");
+        setAuthPassword("");
+        setAuthConfirmPassword("");
+        setAuthNickname("");
+        setAuthAvatarUri(null);
+        sessionStartedAtRef.current = Date.now();
+        await trackAnalyticsEvent("auth_register", { details: "server_quick_register" }, email);
+        await trackAnalyticsEvent("session_start", { details: "quick_register" }, email);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Не удалось зарегистрировать аккаунт через сервер.";
+        setAuthError(message);
+        return;
+      }
+    }
+
     try {
       const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+      const nowIso = new Date().toISOString();
       const store: AuthStore = raw
         ? (JSON.parse(raw) as AuthStore)
         : {
-            users: {},
+            users: createSeedUsers(nowIso),
             currentEmail: null,
           };
+      store.users[ADMIN_EMAIL] ??= {
+        email: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD,
+        role: "ADMIN",
+        profile: buildDefaultProfile(),
+        analytics: buildDefaultAnalytics(nowIso),
+      };
+      store.users[USER_EMAIL] ??= {
+        email: USER_EMAIL,
+        password: USER_PASSWORD,
+        role: "USER",
+        profile: buildDefaultProfile(),
+        analytics: buildDefaultAnalytics(nowIso),
+      };
+      Object.values(store.users).forEach((entry) => {
+        if (!entry.role) {
+          entry.role = entry.email === ADMIN_EMAIL ? "ADMIN" : "USER";
+        }
+      });
 
       if (store.users[email]) {
         setAuthError("Этот email уже есть. Нажми «Войти».");
         return;
       }
 
-      const nowIso = new Date().toISOString();
       store.users[email] = {
         email,
         password: authPassword,
-        profile: buildDefaultProfile(),
+        role: "USER",
+        profile: (() => {
+          const profile = buildDefaultProfile();
+          const nickname = sanitizeShortText(authNickname, "", 60);
+          if (nickname) {
+            profile.displayName = nickname;
+            profile.profileSetupDone = true;
+          }
+          profile.avatarUri = sanitizeAvatarUri(authAvatarUri);
+          profile.gender = authGender;
+          profile.isAdult18Plus = authIsAdult18Plus;
+          return profile;
+        })(),
         analytics: buildDefaultAnalytics(nowIso),
       };
       store.currentEmail = email;
@@ -3636,15 +6676,36 @@ export default function App() {
 
       const user = store.users[email];
       setCurrentUserEmail(email);
+      setCurrentUserRole(user.role ?? "USER");
+      const safeDisplayName = sanitizeShortText(user.profile.displayName, "Герой леса", 60);
+      setDisplayName(safeDisplayName);
+      setProfileNameDraft(safeDisplayName);
+      setAvatarUri(sanitizeAvatarUri(user.profile.avatarUri));
+      setProfileGender(sanitizeProfileGender((user.profile as Partial<UserProfile>).gender));
+      setIsAdult18Plus(Boolean((user.profile as Partial<UserProfile>).isAdult18Plus ?? true));
+      setProfileSetupDone(Boolean(user.profile.profileSetupDone));
+      setAboutMe(sanitizeShortText(user.profile.aboutMe, "Тренирую диалог и границы в сложных разговорах.", 180));
+      setFriendEmails(sanitizeStringArray(user.profile.friendEmails));
+      setSelectedFriendEmail("");
+      setOpenedFriendEmail(null);
       setXp(user.profile.xp);
+      setEnergy(typeof user.profile.energy === "number" ? user.profile.energy : 120);
       setCompletedCount(user.profile.completedCount);
       setLastFeedback(user.profile.lastFeedback);
       setSelectedQuestId(user.profile.selectedQuestId);
-      setEventJoined(user.profile.eventJoined);
+      setEventProgress(sanitizeEventProgress(user.profile.eventProgress, (user.profile as { eventJoined?: boolean }).eventJoined));
       setSelectedDifficulty(user.profile.selectedDifficulty);
       setSelectedStory(user.profile.selectedStory);
+      setStartedStoryIds(
+        sanitizeStringArray((user.profile as Partial<UserProfile>).startedStoryIds).filter((id): id is QuestStory =>
+          storyConfigs.some((story) => story.id === id)
+        )
+      );
       setActiveProgramMode(user.profile.activeProgramMode ?? "story");
-      setActiveTab(user.profile.activeTab);
+      setActiveTab((user.role ?? "USER") === "ADMIN" ? user.profile.activeTab : user.profile.activeTab === "admin" ? "map" : user.profile.activeTab);
+      if (!Boolean(user.profile.profileSetupDone)) {
+        setActiveTab("profile");
+      }
       const safePrimaryStyle = sanitizeConflictStyle(user.profile.conflictPrimaryStyle);
       setConflictPrimaryStyle(safePrimaryStyle);
       setConflictSecondaryStyles(sanitizeSecondaryConflictStyles(user.profile.conflictSecondaryStyles, safePrimaryStyle));
@@ -3652,6 +6713,19 @@ export default function App() {
       setSelectedCourseId(user.profile.selectedCourseId ?? recommendedCourseByConflictStyle[safePrimaryStyle]);
       setUnlockedEndings(sanitizeStringArray(user.profile.unlockedEndings));
       setUnlockedAchievements(sanitizeStringArray(user.profile.unlockedAchievements));
+      setPracticeStats(sanitizePracticeStats(user.profile.practiceStats));
+      setQuestRatingStats(sanitizeQuestRatingStats(user.profile.questRatingStats));
+      setSoundEnabled(typeof user.profile.soundEnabled === "boolean" ? user.profile.soundEnabled : true);
+      setClaimedDailyEnergyAt(user.profile.claimedDailyEnergyAt ?? null);
+      setWelcomeEnergyGranted(Boolean(user.profile.welcomeEnergyGranted));
+      setGrantedPerfectStageIds(sanitizeStringArray(user.profile.grantedPerfectStageIds));
+      setRedeemedPromoCodes(sanitizeStringArray(user.profile.redeemedPromoCodes));
+      setReferralInvitesCompleted(typeof user.profile.referralInvitesCompleted === "number" ? user.profile.referralInvitesCompleted : 0);
+      setUnlockedPaidStageKeys(sanitizeStringArray(user.profile.unlockedPaidStageKeys));
+      setEnergyTransfersSentToday(typeof user.profile.energyTransfersSentToday === "number" ? user.profile.energyTransfersSentToday : 0);
+      setEnergyTransfersSentWeek(typeof user.profile.energyTransfersSentWeek === "number" ? user.profile.energyTransfersSentWeek : 0);
+      setLastEnergyTransferAt(user.profile.lastEnergyTransferAt ?? null);
+      setLastSeenAt(user.profile.lastSeenAt ?? null);
       setShowDiagnosticResult(false);
       setIsProfileHydrated(true);
       setAuthError("");
@@ -3659,6 +6733,7 @@ export default function App() {
       setAuthEmail("");
       setAuthPassword("");
       setAuthConfirmPassword("");
+      setAuthNickname("");
       sessionStartedAtRef.current = Date.now();
       await trackAnalyticsEvent("auth_register", { details: "quick_register" }, email);
       await trackAnalyticsEvent("session_start", { details: "quick_register" }, email);
@@ -3674,6 +6749,9 @@ export default function App() {
         const durationSec = sessionStartedAtRef.current ? Math.max(1, Math.round((Date.now() - sessionStartedAtRef.current) / 1000)) : 0;
         await trackAnalyticsEvent("session_end", { details: `duration_sec:${durationSec}` }, currentUserEmail);
       }
+      if (isServerAuth) {
+        await AsyncStorage.removeItem(authApi.storageKey);
+      }
       const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
       if (raw) {
         const store = JSON.parse(raw) as AuthStore;
@@ -3683,15 +6761,30 @@ export default function App() {
     } finally {
       sessionStartedAtRef.current = null;
       setCurrentUserEmail(null);
+      setCurrentUserRole("USER");
       setIsProfileHydrated(false);
       const profile = buildDefaultProfile();
+      setDisplayName(profile.displayName);
+      setProfileNameDraft(profile.displayName);
+      setAvatarUri(profile.avatarUri);
+      setProfileSetupDone(profile.profileSetupDone);
+      setAboutMe(profile.aboutMe);
+      setFriendEmails(profile.friendEmails);
+      setSelectedFriendEmail("");
+      setOpenedFriendEmail(null);
       setXp(profile.xp);
+      setEnergy(profile.energy);
       setCompletedCount(profile.completedCount);
       setLastFeedback(profile.lastFeedback);
       setSelectedQuestId(profile.selectedQuestId);
-      setEventJoined(profile.eventJoined);
+      setEventProgress(sanitizeEventProgress(profile.eventProgress, (profile as { eventJoined?: boolean }).eventJoined));
       setSelectedDifficulty(profile.selectedDifficulty);
       setSelectedStory(profile.selectedStory);
+      setStartedStoryIds(
+        sanitizeStringArray((profile as Partial<UserProfile>).startedStoryIds).filter((id): id is QuestStory =>
+          storyConfigs.some((story) => story.id === id)
+        )
+      );
       setActiveProgramMode(profile.activeProgramMode);
       setActiveTab(profile.activeTab);
       setConflictPrimaryStyle(profile.conflictPrimaryStyle);
@@ -3700,6 +6793,19 @@ export default function App() {
       setSelectedCourseId(profile.selectedCourseId);
       setUnlockedEndings(profile.unlockedEndings);
       setUnlockedAchievements(profile.unlockedAchievements);
+      setPracticeStats(profile.practiceStats);
+      setQuestRatingStats(sanitizeQuestRatingStats(profile.questRatingStats));
+      setSoundEnabled(profile.soundEnabled);
+      setClaimedDailyEnergyAt(profile.claimedDailyEnergyAt);
+      setWelcomeEnergyGranted(profile.welcomeEnergyGranted);
+      setGrantedPerfectStageIds(profile.grantedPerfectStageIds);
+      setRedeemedPromoCodes(profile.redeemedPromoCodes);
+      setReferralInvitesCompleted(profile.referralInvitesCompleted);
+      setUnlockedPaidStageKeys(profile.unlockedPaidStageKeys);
+      setEnergyTransfersSentToday(profile.energyTransfersSentToday);
+      setEnergyTransfersSentWeek(profile.energyTransfersSentWeek);
+      setLastEnergyTransferAt(profile.lastEnergyTransferAt);
+      setLastSeenAt(profile.lastSeenAt);
       setDiagnosticIndex(0);
       setDiagnosticAnswers([]);
       setDiagnosticError("");
@@ -3712,6 +6818,42 @@ export default function App() {
     }
   };
 
+  const grantEnergyFromAdmin = async (targetEmail: string) => {
+    const rawAmount = adminGrantAmountByEmail[targetEmail] ?? "0";
+    const amount = Number(rawAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setAdminActionMessage("Укажи корректное число энергии больше 0.");
+      return;
+    }
+
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) {
+      setAdminActionMessage("Не удалось найти хранилище пользователей.");
+      return;
+    }
+    const store = JSON.parse(raw) as AuthStore;
+    const user = store.users[targetEmail];
+    if (!user) {
+      setAdminActionMessage("Пользователь не найден.");
+      return;
+    }
+
+    user.profile.energy = Math.max(0, (typeof user.profile.energy === "number" ? user.profile.energy : 0) + amount);
+    user.analytics = withUserAnalytics(user, new Date().toISOString());
+    store.users[targetEmail] = user;
+    await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(store));
+
+    if (targetEmail === currentUserEmail) {
+      setEnergy(user.profile.energy);
+    }
+    setAdminGrantAmountByEmail((prev) => ({ ...prev, [targetEmail]: "10" }));
+    setAdminActionMessage(`Пользователю ${targetEmail} начислено +${amount} энергии.`);
+    await trackAnalyticsEvent("answer_correct", {
+      details: `admin_grant_energy:${amount};target:${targetEmail}`,
+    });
+    await refreshAnalyticsSnapshot();
+  };
+
   const activePrimaryConflictStyle = conflictStyles.find((style) => style.id === conflictPrimaryStyle) ?? conflictStyles[0];
   const recommendedStory = recommendedStoryByConflictStyle[conflictPrimaryStyle];
   const recommendedStoryConfig = storyConfigs.find((story) => story.id === recommendedStory) ?? storyConfigs[0];
@@ -3719,13 +6861,281 @@ export default function App() {
   const activeDiagnosticReport = diagnosticReportByStyle[conflictPrimaryStyle] ?? diagnosticReportByStyle.avoiding;
   const recommendedCourseId = activeDiagnosticReport.recommendedCourseId ?? recommendedCourseByConflictStyle[conflictPrimaryStyle];
   const recommendedCourse = courses.find((course) => course.id === recommendedCourseId) ?? courses[0];
+  const topPracticeError = Object.entries(practiceStats.errorByType).sort((a, b) => b[1] - a[1])[0];
+  const repeatedErrorCourseId = topPracticeError && topPracticeError[1] > 7 ? inferRecommendedCourseByErrorType(topPracticeError[0]) : null;
+  const repeatedErrorCourse = repeatedErrorCourseId ? courses.find((course) => course.id === repeatedErrorCourseId) : null;
+  const wrongTacticScaleData = useMemo(() => {
+    const byBranch: Record<BranchId, number> = {
+      strategist: 0,
+      empath: 0,
+      boundary: 0,
+      challenger: 0,
+      architect: 0,
+    };
+    Object.entries(practiceStats.wrongTacticByType).forEach(([tactic, count]) => {
+      const branch = detectBranchFromKey(tactic);
+      if (!branch) {
+        return;
+      }
+      byBranch[branch] += count;
+    });
+    return buildBranchScaleData(byBranch).filter((item) => item.value > 0);
+  }, [practiceStats.wrongTacticByType]);
+  const achievementItems = useMemo(
+    () =>
+      unlockedAchievements
+        .slice(-12)
+        .reverse()
+        .map((id) => {
+          const parsed = parseAchievement(id);
+          if (!parsed) {
+            return {
+              id,
+              icon: "🏅",
+              title: formatAchievementLabel(id),
+              details: "Подробности по этой ачивке недоступны.",
+            };
+          }
+          const endingIcon: Record<EndingRouteId, string> = {
+            order: "🧭",
+            harmony: "🤝",
+            boundary: "🛡️",
+            breakthrough: "⚡",
+          };
+          return {
+            id,
+            icon: endingIcon[parsed.ending],
+            title: `${campaignLore[parsed.campaign].title} — ${endingRouteName[parsed.ending]}`,
+            details: endingNarrativeByRoute(parsed.campaign)[parsed.ending],
+          };
+        }),
+    [unlockedAchievements]
+  );
+  const stageIndexByStep = currentForestQuestSteps.map((_, idx) =>
+    getStageIdxByRhythm(activeCampaignId, idx, currentForestQuestSteps.length)
+  );
+  const stageCount = useMemo(
+    () => (stageIndexByStep.length ? Math.max(...stageIndexByStep) + 1 : 1),
+    [stageIndexByStep]
+  );
+  const stageStartIndices = useMemo(() => {
+    const starts = Array.from({ length: stageCount }, () => -1);
+    stageIndexByStep.forEach((stageIdx, idx) => {
+      if (starts[stageIdx] === -1) {
+        starts[stageIdx] = idx;
+      }
+    });
+    return starts;
+  }, [stageCount, stageIndexByStep]);
+  const stageStepCounts = useMemo(() => {
+    const counts = Array.from({ length: stageCount }, () => 0);
+    stageIndexByStep.forEach((stageIdx) => {
+      counts[stageIdx] += 1;
+    });
+    return counts;
+  }, [stageCount, stageIndexByStep]);
+  const activeStageIdx = stageIndexByStep[Math.max(0, Math.min(forestStepIndex, stageIndexByStep.length - 1))] ?? 0;
+  const activeStageTitle = getCampaignBlockArc(activeCampaignId, activeStageIdx);
+  const stageRoadItems = Array.from({ length: stageCount }, (_, stageIdx) => {
+    const startIdx = stageStartIndices[stageIdx];
+    const isPresent = startIdx !== -1;
+    const isDone = isPresent && forestStepIndex > startIdx && stageIdx < activeStageIdx;
+    const isCurrent = isPresent && stageIdx === activeStageIdx;
+    const isAvailable = isPresent && (forestFinished ? true : stageIdx <= activeStageIdx);
+    return {
+      stageIdx,
+      isPresent,
+      isDone,
+      isCurrent,
+      isAvailable,
+      title: getCampaignBlockArc(activeCampaignId, stageIdx),
+      stepCount: stageStepCounts[stageIdx],
+      startIdx,
+    };
+  });
+  const compactStageRoadItems = useMemo(() => {
+    const done = stageRoadItems.filter((item) => item.isDone);
+    const current = stageRoadItems.find((item) => item.isCurrent || item.isAvailable);
+    const next = stageRoadItems.find((item) => item.isPresent && item.stageIdx > (current?.stageIdx ?? -1));
+    const shortlist = [
+      done.length ? done[done.length - 1] : null,
+      current ?? null,
+      next ?? null,
+    ].filter((item): item is (typeof stageRoadItems)[number] => Boolean(item));
+    const deduped = shortlist.filter((item, idx, arr) => arr.findIndex((x) => x.stageIdx === item.stageIdx) === idx);
+    return deduped.length ? deduped : stageRoadItems.filter((item) => item.isPresent).slice(0, 3);
+  }, [stageRoadItems]);
+  const visibleStageRoadItems = stageRoadExpanded ? stageRoadItems.filter((item) => item.isPresent) : compactStageRoadItems;
+  const episodeProgressPercent = Math.round(((forestStepIndex + 1) / Math.max(1, currentForestQuestSteps.length)) * 100);
+  const effectiveEpisodeProgressPercent = forestFinished ? 100 : episodeProgressPercent;
   const questProgressPercent = currentForestQuestSteps.length
     ? Math.round(((forestStepIndex + 1) / currentForestQuestSteps.length) * 100)
     : 0;
   const threeDayProgram = (styleMicroExercises[conflictPrimaryStyle] ?? styleMicroExercises.avoiding).slice(0, 3);
   const dayIndex = Math.min(2, completedCount % 3);
   const dailyTask = threeDayProgram[dayIndex] ?? threeDayProgram[0];
-  const analyticsUsers = Object.entries(analyticsSnapshot).sort((a, b) => (a[1].lastSeenAt < b[1].lastSeenAt ? 1 : -1));
+  const filteredAdminUsers = adminUsers.filter((user) =>
+    user.email.toLowerCase().includes(adminUserSearch.trim().toLowerCase())
+  );
+  const visibleTabs = tabs.filter((tab) => (tab.key === "admin" ? currentUserRole === "ADMIN" : true));
+  const currentStageCost = Math.min(28, 12 + Math.max(0, completedCount - 1) * 2);
+  const storyRatingLabel = (storyId: QuestStory) => {
+    const stats = questRatingStats[storyId];
+    if (!stats.count) {
+      return "Новая история";
+    }
+    const avg = stats.sum / stats.count;
+    return `${avg.toFixed(1).replace(".", ",")} * ${stats.count} 👤`;
+  };
+  const openedFriendProfile = openedFriendEmail ? friendProfiles[openedFriendEmail] : null;
+  const completedStoryEndingById = useMemo(() => {
+    const next: Partial<Record<QuestStory, EndingRouteId>> = {};
+    unlockedEndings.forEach((endingId) => {
+      const parts = endingId.split(":");
+      if (parts.length !== 3 || parts[0] !== "ending") {
+        return;
+      }
+      const campaign = parts[1] as QuestStory;
+      const route = parts[2] as EndingRouteId;
+      if (storyConfigs.some((story) => story.id === campaign) && endingRouteName[route]) {
+        next[campaign] = route;
+      }
+    });
+    return next;
+  }, [unlockedEndings]);
+  const storyStatusById = useMemo(() => {
+    const statusMap = {} as Record<QuestStory, StoryRunStatus>;
+    storyConfigs.forEach((story) => {
+      if (completedStoryEndingById[story.id]) {
+        statusMap[story.id] = "completed";
+        return;
+      }
+      if (startedStoryIds.includes(story.id) || (activeProgramMode === "story" && selectedStory === story.id)) {
+        statusMap[story.id] = "in_progress";
+        return;
+      }
+      statusMap[story.id] = "not_started";
+    });
+    return statusMap;
+  }, [activeProgramMode, completedStoryEndingById, selectedStory, startedStoryIds]);
+  const questFeedStories = useMemo(
+    () => storyConfigs.filter((story) => storyStatusById[story.id] !== "not_started"),
+    [storyStatusById]
+  );
+  const openStoryFromFeed = (storyId: QuestStory, mode: "continue" | "road") => {
+    setActiveProgramMode("story");
+    setSelectedStory(storyId);
+    const isCompleted = storyStatusById[storyId] === "completed";
+    if (mode === "road" && isCompleted) {
+      const completedLength = buildForestQuestByDifficulty(selectedDifficulty, storyId).length;
+      setForestStarted(false);
+      setForestFinished(true);
+      setForestStepIndex(Math.max(0, completedLength - 1));
+      setActiveTab("quest");
+      return;
+    }
+    setForestStarted(false);
+    setForestFinished(false);
+    setForestStepIndex(0);
+    resetStepUi();
+    setActiveTab("quest");
+  };
+  const toggleCatalogTag = (tag: string) => {
+    setMapCatalogTab("all");
+    setActiveCatalogTag((prev) => (prev === tag ? null : tag));
+  };
+  const getCourseTags = (course: CourseConfig) => [
+    "Переговоры",
+    ...course.recommendedFor
+      .map((styleId) => conflictStyles.find((style) => style.id === styleId)?.label ?? styleId)
+      .slice(0, 2),
+  ];
+  const getStoryTags = (story: StoryConfig) => {
+    const genreTag: Record<QuestStory, string> = {
+      forest: "Приключение",
+      romance: "Романтика",
+      slytherin: "Интриги",
+      boss: "Работа",
+      narcissist: "Границы",
+      gryffindor_common_room: "Лидерство",
+      ravenclaw_common_room: "Аргументация",
+      hufflepuff_common_room: "Бережность",
+    };
+    return [genreTag[story.id], "Сюжет"];
+  };
+  const hasStartedStoriesInCatalog = storyConfigs.some((story) => storyStatusById[story.id] !== "not_started");
+  const applyServerUserSnapshot = (email: string, role: UserRole, profileInput: unknown, walletInput?: EconomySnapshot) => {
+    const profile = (profileInput && typeof profileInput === "object" ? profileInput : {}) as Partial<UserProfile>;
+    const safeDisplayName = sanitizeShortText(profile.displayName, "Герой леса", 60);
+    const safePrimaryStyle = sanitizeConflictStyle(profile.conflictPrimaryStyle);
+
+    setCurrentUserEmail(email);
+    setCurrentUserRole(role);
+    setDisplayName(safeDisplayName);
+    setProfileNameDraft(safeDisplayName);
+    setAvatarUri(sanitizeAvatarUri(profile.avatarUri));
+    setProfileGender(sanitizeProfileGender(profile.gender));
+    setIsAdult18Plus(typeof profile.isAdult18Plus === "boolean" ? profile.isAdult18Plus : true);
+    setProfileSetupDone(Boolean(profile.profileSetupDone));
+    setAboutMe(sanitizeShortText(profile.aboutMe, "Тренирую диалог и границы в сложных разговорах.", 180));
+    setFriendEmails(sanitizeStringArray(profile.friendEmails));
+    setSelectedFriendEmail("");
+    setOpenedFriendEmail(null);
+    setXp(typeof walletInput?.xp === "number" ? walletInput.xp : typeof profile.xp === "number" ? profile.xp : 124);
+    setEnergy(typeof walletInput?.energy === "number" ? walletInput.energy : typeof profile.energy === "number" ? profile.energy : 120);
+    setCompletedCount(typeof profile.completedCount === "number" ? profile.completedCount : 0);
+    setLastFeedback(typeof profile.lastFeedback === "string" ? profile.lastFeedback : "");
+    setSelectedQuestId(typeof profile.selectedQuestId === "string" ? profile.selectedQuestId : dailyQuests[0].id);
+    setEventProgress(sanitizeEventProgress(profile.eventProgress, (profile as { eventJoined?: boolean }).eventJoined));
+    setSelectedDifficulty([5, 10, 15, 25, 125].includes(profile.selectedDifficulty as number) ? (profile.selectedDifficulty as QuestDifficulty) : 5);
+    setSelectedStory(
+      ["forest", "romance", "slytherin", "boss", "narcissist", "gryffindor_common_room", "ravenclaw_common_room", "hufflepuff_common_room"].includes(
+        profile.selectedStory as string
+      )
+        ? (profile.selectedStory as QuestStory)
+        : "forest"
+    );
+    setStartedStoryIds(
+      sanitizeStringArray(profile.startedStoryIds).filter((id): id is QuestStory => storyConfigs.some((story) => story.id === id))
+    );
+    setActiveProgramMode(profile.activeProgramMode === "course" ? "course" : "story");
+    setActiveTab(role === "ADMIN" ? (profile.activeTab as Tab) ?? "map" : (profile.activeTab as Tab) === "admin" ? "map" : (profile.activeTab as Tab) ?? "map");
+    setConflictPrimaryStyle(safePrimaryStyle);
+    setConflictSecondaryStyles(sanitizeSecondaryConflictStyles(profile.conflictSecondaryStyles, safePrimaryStyle));
+    setDiagnosticCompleted(Boolean(profile.diagnosticCompleted));
+    setSelectedCourseId((profile.selectedCourseId as CourseId) ?? recommendedCourseByConflictStyle[safePrimaryStyle]);
+    setUnlockedEndings(sanitizeStringArray(profile.unlockedEndings));
+    setUnlockedAchievements(sanitizeStringArray(profile.unlockedAchievements));
+    setPracticeStats(sanitizePracticeStats(profile.practiceStats));
+    setQuestRatingStats(sanitizeQuestRatingStats(profile.questRatingStats));
+    setSoundEnabled(typeof profile.soundEnabled === "boolean" ? profile.soundEnabled : true);
+    setClaimedDailyEnergyAt(profile.claimedDailyEnergyAt ?? null);
+    setWelcomeEnergyGranted(Boolean(profile.welcomeEnergyGranted));
+    setGrantedPerfectStageIds(sanitizeStringArray(profile.grantedPerfectStageIds));
+    setRedeemedPromoCodes(sanitizeStringArray(profile.redeemedPromoCodes));
+    setReferralInvitesCompleted(typeof profile.referralInvitesCompleted === "number" ? profile.referralInvitesCompleted : 0);
+    setUnlockedPaidStageKeys(sanitizeStringArray(profile.unlockedPaidStageKeys));
+    setEnergyTransfersSentToday(typeof profile.energyTransfersSentToday === "number" ? profile.energyTransfersSentToday : 0);
+    setEnergyTransfersSentWeek(typeof profile.energyTransfersSentWeek === "number" ? profile.energyTransfersSentWeek : 0);
+    setLastEnergyTransferAt(profile.lastEnergyTransferAt ?? null);
+    setLastSeenAt(profile.lastSeenAt ?? null);
+    setShowDiagnosticResult(false);
+    setIsProfileHydrated(true);
+  };
+  const needsProfileSetup = !profileSetupDone || !displayName.trim() || displayName === "Герой леса";
+  const canClaimDailyEnergy = useMemo(() => {
+    const last = claimedDailyEnergyAt ? Date.parse(claimedDailyEnergyAt) : 0;
+    if (!last) {
+      return true;
+    }
+    return Date.now() - last >= 24 * 60 * 60 * 1000;
+  }, [claimedDailyEnergyAt]);
+  const transferAmountValue = Number(transferAmountInput);
+  const canSendEnergyToFriend =
+    Boolean(selectedFriendEmail) &&
+    Number.isFinite(transferAmountValue) &&
+    transferAmountValue >= ENERGY_TRANSFER_MIN &&
+    transferAmountValue <= energy;
 
   const toggleSecondaryConflictStyle = (styleId: ConflictStyleId) => {
     if (styleId === conflictPrimaryStyle) {
@@ -3749,6 +7159,266 @@ export default function App() {
     setDiagnosticError("");
     setDiagnosticCompleted(false);
     setShowDiagnosticResult(false);
+  };
+
+  const applyEconomySnapshot = (snapshot: EconomySnapshot) => {
+    if (typeof snapshot.xp === "number") {
+      setXp(snapshot.xp);
+    }
+    if (typeof snapshot.energy === "number") {
+      setEnergy(snapshot.energy);
+    }
+  };
+
+  const grantEnergy = (amount: number, reason: string) => {
+    if (amount <= 0) return;
+    setEnergy((prev) => prev + amount);
+    trackAnalyticsEvent("answer_correct", {
+      details: `energy_granted:${reason};amount:${amount}`,
+      courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
+      storyId: activeProgramMode === "story" ? selectedStory : undefined,
+      stepIndex: forestStepIndex,
+    }).catch(() => undefined);
+  };
+
+  const spendEnergy = (amount: number, reason: string): boolean => {
+    if (amount <= 0) return true;
+    if (energy < amount) {
+      setStepMessage(`Недостаточно энергии: нужно ${amount}, сейчас ${energy}.`);
+      trackAnalyticsEvent("answer_incorrect", {
+        details: `energy_insufficient:${reason};need:${amount};have:${energy}`,
+        courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
+        storyId: activeProgramMode === "story" ? selectedStory : undefined,
+      }).catch(() => undefined);
+      return false;
+    }
+    setEnergy((prev) => Math.max(0, prev - amount));
+    trackAnalyticsEvent("answer_incorrect", {
+      details: `energy_spent:${reason};amount:${amount}`,
+      courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
+      storyId: activeProgramMode === "story" ? selectedStory : undefined,
+      stepIndex: forestStepIndex,
+    }).catch(() => undefined);
+    return true;
+  };
+
+  const claimDailyEnergy = async () => {
+    if (!canClaimDailyEnergy || isClaimingDailyEnergy) {
+      setPromoInfo("Ежедневная энергия уже получена. Возвращайся позже.");
+      return;
+    }
+    setIsClaimingDailyEnergy(true);
+    if (economyMode === "server") {
+      try {
+        const snapshot = await economyApi.claimDaily();
+        applyEconomySnapshot(snapshot);
+        setClaimedDailyEnergyAt(new Date().toISOString());
+        setPromoInfo("Ежедневный бонус начислен (server).");
+      } catch {
+        setPromoInfo("Не удалось получить daily-бонус с сервера.");
+      } finally {
+        setIsClaimingDailyEnergy(false);
+      }
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const last = claimedDailyEnergyAt ? Date.parse(claimedDailyEnergyAt) : 0;
+    if (last && Date.now() - last < 24 * 60 * 60 * 1000) {
+      setPromoInfo("Ежедневная энергия уже получена. Возвращайся завтра.");
+      setIsClaimingDailyEnergy(false);
+      return;
+    }
+    setClaimedDailyEnergyAt(nowIso);
+    grantEnergy(ENERGY_DAILY_BONUS, "daily_claim");
+    setPromoInfo(`Ежедневный бонус: +${ENERGY_DAILY_BONUS} энергии.`);
+    setIsClaimingDailyEnergy(false);
+  };
+
+  const redeemPromoCode = async () => {
+    const normalized = promoCodeInput.trim().toUpperCase();
+    if (!normalized) {
+      setPromoInfo("Введи промокод.");
+      return;
+    }
+    if (economyMode === "server") {
+      try {
+        const snapshot = await economyApi.redeemPromo(normalized);
+        applyEconomySnapshot(snapshot);
+        setPromoInfo("Промокод активирован (server).");
+        setPromoCodeInput("");
+      } catch {
+        setPromoInfo("Промокод не принят сервером.");
+      }
+      return;
+    }
+
+    if (redeemedPromoCodes.includes(normalized)) {
+      setPromoInfo("Этот промокод уже активирован.");
+      return;
+    }
+    const campaign = promoCampaigns.find((promo) => promo.code === normalized);
+    if (!campaign) {
+      setPromoInfo("Промокод не найден.");
+      return;
+    }
+    if (Date.now() > Date.parse(campaign.expiresAt)) {
+      setPromoInfo("Срок действия промокода истек.");
+      return;
+    }
+    setRedeemedPromoCodes((prev) => [...prev, normalized]);
+    grantEnergy(campaign.energy, `promo:${normalized}`);
+    setPromoInfo(`Промокод активирован: +${campaign.energy} энергии.`);
+    setPromoCodeInput("");
+  };
+
+  const completeReferralInvite = async () => {
+    if (economyMode === "server") {
+      try {
+        const snapshot = await economyApi.validateReferral("friend@example.com");
+        applyEconomySnapshot(snapshot);
+        setPromoInfo("Реферал подтвержден (server).");
+      } catch {
+        setPromoInfo("Не удалось подтвердить реферал на сервере.");
+      }
+      return;
+    }
+    setReferralInvitesCompleted((prev) => prev + 1);
+    grantEnergy(ENERGY_REFERRAL_BONUS, "referral_complete");
+    setPromoInfo(`Друг завершил первый этап. Бонус: +${ENERGY_REFERRAL_BONUS} энергии.`);
+  };
+
+  const addFriendByEmail = async () => {
+    const normalized = normalizeEmail(friendEmailInput);
+    if (!normalized || !normalized.includes("@")) {
+      setPromoInfo("Введите корректный email друга.");
+      return;
+    }
+    if (!currentUserEmail) {
+      setPromoInfo("Сначала войди в аккаунт.");
+      return;
+    }
+    if (normalized === currentUserEmail) {
+      setPromoInfo("Нельзя добавить себя в друзья.");
+      return;
+    }
+
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) {
+      setPromoInfo("Не удалось открыть базу пользователей.");
+      return;
+    }
+    const store = JSON.parse(raw) as AuthStore;
+    const me = store.users[currentUserEmail];
+    const friend = store.users[normalized];
+    if (!me || !friend) {
+      setPromoInfo("Пользователь с таким email не найден.");
+      return;
+    }
+
+    const myFriends = sanitizeStringArray(me.profile.friendEmails);
+    if (myFriends.includes(normalized)) {
+      setPromoInfo("Этот друг уже добавлен.");
+      setFriendEmailInput("");
+      return;
+    }
+
+    me.profile.friendEmails = [...myFriends, normalized];
+    const friendFriends = sanitizeStringArray(friend.profile.friendEmails);
+    if (!friendFriends.includes(currentUserEmail)) {
+      friend.profile.friendEmails = [...friendFriends, currentUserEmail];
+    }
+
+    store.users[currentUserEmail] = me;
+    store.users[normalized] = friend;
+    await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(store));
+    setFriendEmails(me.profile.friendEmails);
+    setSelectedFriendEmail(normalized);
+    setFriendEmailInput("");
+    setPromoInfo(`Друг добавлен: ${normalized}`);
+    await refreshFriendProfiles(me.profile.friendEmails);
+  };
+
+  const sendEnergyToFriend = async () => {
+    const amount = Number(transferAmountInput);
+    if (!Number.isFinite(amount) || amount < ENERGY_TRANSFER_MIN) {
+      setPromoInfo(`Минимальный перевод: ${ENERGY_TRANSFER_MIN} энергии.`);
+      return;
+    }
+    const targetEmail = normalizeEmail(selectedFriendEmail);
+    if (!targetEmail) {
+      setPromoInfo("Выбери друга для перевода.");
+      return;
+    }
+    if (!friendEmails.includes(targetEmail)) {
+      setPromoInfo("Сначала добавь этого пользователя в друзья.");
+      return;
+    }
+    if (economyMode === "server") {
+      try {
+        const snapshot = await economyApi.transferEnergy(amount, targetEmail);
+        applyEconomySnapshot(snapshot);
+        setPromoInfo(`Перевод ${amount} энергии отправлен: ${targetEmail}.`);
+      } catch {
+        setPromoInfo("Сервер отклонил перевод энергии.");
+      }
+      return;
+    }
+
+    const now = Date.now();
+    const last = lastEnergyTransferAt ? Date.parse(lastEnergyTransferAt) : 0;
+    const isSameDay = last ? now - last < 24 * 60 * 60 * 1000 : false;
+    const isSameWeek = last ? now - last < 7 * 24 * 60 * 60 * 1000 : false;
+    const dailyUsed = isSameDay ? energyTransfersSentToday : 0;
+    const weeklyUsed = isSameWeek ? energyTransfersSentWeek : 0;
+    if (dailyUsed + amount > ENERGY_TRANSFER_DAILY_LIMIT) {
+      setPromoInfo(`Лимит отправки в день: ${ENERGY_TRANSFER_DAILY_LIMIT} энергии.`);
+      return;
+    }
+    if (weeklyUsed + amount > ENERGY_TRANSFER_WEEKLY_LIMIT) {
+      setPromoInfo(`Лимит отправки в неделю: ${ENERGY_TRANSFER_WEEKLY_LIMIT} энергии.`);
+      return;
+    }
+
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw || !currentUserEmail) {
+      setPromoInfo("Не удалось выполнить перевод.");
+      return;
+    }
+    const store = JSON.parse(raw) as AuthStore;
+    const sender = store.users[currentUserEmail];
+    const recipient = store.users[targetEmail];
+    if (!sender || !recipient) {
+      setPromoInfo("Друг не найден.");
+      return;
+    }
+
+    const senderEnergy = typeof sender.profile.energy === "number" ? sender.profile.energy : 0;
+    if (senderEnergy < amount) {
+      setPromoInfo(`Недостаточно энергии: нужно ${amount}, сейчас ${senderEnergy}.`);
+      return;
+    }
+
+    sender.profile.energy = senderEnergy - amount;
+    recipient.profile.energy = (typeof recipient.profile.energy === "number" ? recipient.profile.energy : 0) + amount;
+    store.users[currentUserEmail] = sender;
+    store.users[targetEmail] = recipient;
+    await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(store));
+
+    setEnergy(sender.profile.energy);
+    setLastEnergyTransferAt(new Date(now).toISOString());
+    setEnergyTransfersSentToday((prev) => (isSameDay ? prev + amount : amount));
+    setEnergyTransfersSentWeek((prev) => (isSameWeek ? prev + amount : amount));
+    setPromoInfo(`Отправлено ${amount} энергии пользователю ${targetEmail}.`);
+    await refreshFriendProfiles(friendEmails);
+  };
+
+  const scrollToRecommendedCourse = () => {
+    playSfx("swipe").catch(() => undefined);
+    const targetY = courseCardYRef.current[recommendedCourse.id];
+    mapScrollRef.current?.scrollTo({
+      y: typeof targetY === "number" ? Math.max(0, targetY - 12) : 900,
+      animated: true,
+    });
   };
 
   const completeDiagnostic = (answers: number[]) => {
@@ -3878,6 +7548,54 @@ export default function App() {
                 style={styles.authInput}
               />
             )}
+            {authMode === "register" && (
+              <TextInput
+                value={authNickname}
+                onChangeText={(value) => {
+                  setAuthNickname(value);
+                  setAuthError("");
+                  setAuthInfo("");
+                }}
+                placeholder="Имя или ник (как к тебе обращаться)"
+                placeholderTextColor={colors.textSecondary}
+                style={styles.authInput}
+              />
+            )}
+            {authMode === "register" && (
+              <>
+                <Text style={styles.cardMeta}>Пол</Text>
+                <View style={styles.rowWrap}>
+                  <AppButton
+                    label="Женщина"
+                    variant={authGender === "female" ? "primary" : "secondary"}
+                    onPress={() => setAuthGender("female")}
+                  />
+                  <AppButton
+                    label="Мужчина"
+                    variant={authGender === "male" ? "primary" : "secondary"}
+                    onPress={() => setAuthGender("male")}
+                  />
+                </View>
+                <Text style={styles.cardMeta}>Есть 18 лет?</Text>
+                <View style={styles.rowWrap}>
+                  <AppButton
+                    label="Да, 18+"
+                    variant={authIsAdult18Plus ? "primary" : "secondary"}
+                    onPress={() => setAuthIsAdult18Plus(true)}
+                  />
+                  <AppButton
+                    label="Нет, младше 18"
+                    variant={!authIsAdult18Plus ? "primary" : "secondary"}
+                    onPress={() => setAuthIsAdult18Plus(false)}
+                  />
+                </View>
+                <AppButton
+                  label={authAvatarUri ? "Аватар выбран (изменить)" : "Добавить аватар (можно пропустить)"}
+                  variant="secondary"
+                  onPress={pickAuthAvatarFromLibrary}
+                />
+              </>
+            )}
             {!!authError && <Text style={styles.authError}>{authError}</Text>}
             {!!authInfo && <Text style={styles.authSuccess}>{authInfo}</Text>}
             <AppButton label={authMode === "register" ? "Создать аккаунт" : "Войти"} onPress={handleAuthSubmit} />
@@ -3889,6 +7607,8 @@ export default function App() {
                   setAuthMode("login");
                   setAuthError("");
                   setAuthInfo("");
+                  setAuthNickname("");
+                  setAuthAvatarUri(null);
                 }}
               />
             ) : (
@@ -3901,6 +7621,8 @@ export default function App() {
                     setAuthMode("register");
                     setAuthError("");
                     setAuthInfo("");
+                    setAuthNickname("");
+                    setAuthAvatarUri(null);
                   }}
                 />
               </>
@@ -4015,23 +7737,56 @@ export default function App() {
         </View>
         <View style={styles.headerMetaWrap}>
           <Feather name="zap" size={imageSizes.inlineIcon} color={colors.textSecondary} />
-          <Text style={styles.headerMeta}>Streak {streak} дн.</Text>
+          <Text style={styles.headerMeta}>Энергия {animatedEnergy}</Text>
         </View>
         <View style={styles.headerMetaWrap}>
           <Feather name="award" size={imageSizes.inlineIcon} color={colors.textSecondary} />
-          <Text style={styles.headerMeta}>XP {xp}</Text>
+          <Text style={styles.headerMeta}>XP {animatedXp}</Text>
         </View>
       </View>
 
       <View style={styles.content}>
         {activeTab === "map" && (
-          <ScrollView contentContainerStyle={styles.scroll}>
+          <ScrollView ref={mapScrollRef} contentContainerStyle={styles.scroll} stickyHeaderIndices={[1]}>
             <ScreenHeading
               title="Карта Сказочного Леса"
               subtitle={`Сегодня открыто ${dailyQuests.length} квеста(ов), завершено ${completedCount}.`}
             />
+            <AppCard style={styles.catalogStickyCard}>
+              <View style={styles.cardTitleRow}>
+                <Feather name="layers" size={imageSizes.cardLeadingIcon} color={colors.textPrimary} />
+                <Text style={styles.cardTitle}>{uiEmojiLibrary.dialog} Каталог</Text>
+              </View>
+              <View style={styles.rowWrap}>
+                <Pressable
+                  style={[styles.storyChip, mapCatalogTab === "recommended" && styles.storyChipActive]}
+                  onPress={() => setMapCatalogTab("recommended")}
+                >
+                  <Text style={styles.chipText}>Рекомендованные</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.storyChip, mapCatalogTab === "quests" && styles.storyChipActive]}
+                  onPress={() => setMapCatalogTab("quests")}
+                >
+                  <Text style={styles.chipText}>Квесты</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.storyChip, mapCatalogTab === "courses" && styles.storyChipActive]}
+                  onPress={() => setMapCatalogTab("courses")}
+                >
+                  <Text style={styles.chipText}>Курсы</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.storyChip, mapCatalogTab === "all" && styles.storyChipActive]}
+                  onPress={() => setMapCatalogTab("all")}
+                >
+                  <Text style={styles.chipText}>Всё</Text>
+                </Pressable>
+              </View>
+              {!!activeCatalogTag && <Text style={styles.cardMeta}>Фильтр по тэгу: {activeCatalogTag}</Text>}
+            </AppCard>
             <HeroBanner character={characterLibrary.foxGuide} accentEmoji={uiEmojiLibrary.challenge} title="Выбери курс или сюжет и начни игру" />
-            <ScrollHint />
+            <ScrollHint onPress={scrollToRecommendedCourse} />
 
             <AppCard>
               <View style={styles.cardTitleRow}>
@@ -4041,43 +7796,24 @@ export default function App() {
               <CardIllustration name={courseIllustrationById[activeCourse.id]} />
               <Text style={styles.cardText}>{activeCourse.title}</Text>
               <Text style={styles.cardMeta}>{activeCourse.lore}</Text>
-              <Text style={styles.cardText}>
-                Режим сейчас: {activeProgramMode === "course" ? "Курс (отдельные тренировки)" : `Квест-сюжет ${activeStoryConfig.emoji} ${activeStoryConfig.label}`}
-              </Text>
-              <Text style={styles.cardMeta}>
-                По твоему стилю ({activePrimaryConflictStyle.label}) рекомендуем: {recommendedStoryConfig.emoji} {recommendedStoryConfig.label}
-              </Text>
-              {selectedStory !== recommendedStory && (
-                <AppButton
-                  label={`Применить рекомендацию: ${recommendedStoryConfig.label}`}
-                  variant="secondary"
-                  onPress={() => handleStorySelect(recommendedStory)}
-                />
-              )}
-              <Text style={styles.cardText}>Доступные уровни: {allowedStoryDifficulties.join(" / ")} вопросов.</Text>
-              <DifficultySelector
-                selectedDifficulty={selectedDifficulty}
-                onSelect={setSelectedDifficulty}
-                allowedDifficulties={allowedStoryDifficulties}
+              <Text style={styles.cardText}>{activeCourse.focus}</Text>
+              {activeCourse.features.slice(0, 2).map((feature) => (
+                <Text key={`active-course-feature-${feature}`} style={styles.cardMeta}>
+                  • {feature}
+                </Text>
+              ))}
+              <Text style={styles.cardText}>Прогресс идет по этапам дорожки (короткие сессии по 2-3 минуты).</Text>
+              <AppButton
+                label={activeProgramMode === "course" && forestStarted && !forestFinished ? "Продолжить курс" : `Начать курс: ${activeCourse.title}`}
+                pulse={!(activeProgramMode === "course" && forestStarted && !forestFinished)}
+                onPress={() => {
+                  if (activeProgramMode === "course" && forestStarted && !forestFinished) {
+                    setActiveTab("quest");
+                    return;
+                  }
+                  startCourseQuest(activeCourse);
+                }}
               />
-              <Text style={styles.cardText}>{activeDifficultyConfig.description}</Text>
-              <Text style={styles.forecastText}>
-                Прогноз: ожидаемо +{questForecast.expectedNetXp} XP при 80% точности (
-                {questForecast.expectedCorrect}/{currentForestQuestSteps.length} верных, штрафов ~{questForecast.expectedPenaltyCount})
-              </Text>
-              {!forestStarted && (
-                <AppButton
-                  label={activeProgramMode === "course" ? `Начать курс: ${activeCourse.title}` : `Начать: ${activeStoryConfig.label}`}
-                  pulse
-                  onPress={startForestQuest}
-                />
-              )}
-              {forestStarted && !forestFinished && (
-                <AppButton label="Продолжить квест" onPress={() => setActiveTab("quest")} />
-              )}
-              {forestFinished && (
-                <AppButton label="Начать заново" onPress={startForestQuest} />
-              )}
             </AppCard>
 
             <AppCard style={styles.dailyTaskCard}>
@@ -4090,46 +7826,39 @@ export default function App() {
               <AppButton label="Сделать сегодня" variant="secondary" onPress={() => setActiveTab("quest")} />
             </AppCard>
 
-            <AppCard>
-              <View style={styles.cardTitleRow}>
-                <Feather name="layers" size={imageSizes.cardLeadingIcon} color={colors.textPrimary} />
-                <Text style={styles.cardTitle}>{uiEmojiLibrary.dialog} Каталог квестов</Text>
-              </View>
-              <Text style={styles.cardText}>Все сюжеты вынесены в отдельные карточки ниже.</Text>
-            </AppCard>
-
-            <AppCard>
-              <View style={styles.cardTitleRow}>
-                <Feather name="book-open" size={imageSizes.cardLeadingIcon} color={colors.textPrimary} />
-                <Text style={styles.cardTitle}>{uiEmojiLibrary.challenge} Каталог курсов</Text>
-              </View>
-              <Text style={styles.cardText}>Все курсы для разных паттернов поведения. Карточка сразу запускает выбранный курс.</Text>
-            </AppCard>
-
             {courses.map((course) => {
+              const courseTags = getCourseTags(course);
+              const shouldShowCourseByTab =
+                mapCatalogTab === "all" || mapCatalogTab === "courses" || (mapCatalogTab === "recommended" && course.id === recommendedCourse.id);
+              const shouldShowCourseByTag = !activeCatalogTag || courseTags.includes(activeCatalogTag);
+              const shouldShowCourse = shouldShowCourseByTab && shouldShowCourseByTag;
+              if (!shouldShowCourse) {
+                return null;
+              }
               const isCourseInProgress = activeProgramMode === "course" && selectedCourseId === course.id && forestStarted && !forestFinished;
               const isActiveCourse = selectedCourseId === course.id;
-              const styleTags = course.recommendedFor
-                .map((styleId) => conflictStyles.find((style) => style.id === styleId)?.label ?? styleId)
-                .slice(0, 2);
               return (
-                <AppCard key={`map-course-${course.id}`} style={styles.courseCard}>
+                <AppCard
+                  key={`map-course-${course.id}`}
+                  style={styles.courseCard}
+                  onLayout={(event) => {
+                    courseCardYRef.current[course.id] = event.nativeEvent.layout.y;
+                  }}
+                >
                   <View style={styles.cardTitleRow}>
                     <Feather name="flag" size={imageSizes.inlineIcon} color={colors.textPrimary} />
                     <Text style={styles.cardTitle}>{course.title}</Text>
                   </View>
                   <CardIllustration name={courseIllustrationById[course.id]} />
                   <View style={styles.tagRow}>
-                    <View style={styles.tagPill}>
-                      <Text style={styles.tagPillText}>5/10/15 шагов</Text>
-                    </View>
-                    <View style={styles.tagPill}>
-                      <Text style={styles.tagPillText}>Переговоры</Text>
-                    </View>
-                    {styleTags.map((tag) => (
-                      <View key={`${course.id}-${tag}`} style={styles.tagPill}>
+                    {courseTags.map((tag) => (
+                      <Pressable
+                        key={`${course.id}-${tag}`}
+                        style={[styles.tagPill, activeCatalogTag === tag && styles.storyChipActive]}
+                        onPress={() => toggleCatalogTag(tag)}
+                      >
                         <Text style={styles.tagPillText}>{tag}</Text>
-                      </View>
+                      </Pressable>
                     ))}
                   </View>
                   <Text style={styles.courseLeadText}>{course.lore}</Text>
@@ -4154,7 +7883,7 @@ export default function App() {
                     </View>
                   )}
                   <AppButton
-                    label={isCourseInProgress ? "Продолжить курс" : isActiveCourse ? "Начать активный курс" : "Открыть курс"}
+                    label={isCourseInProgress ? "Продолжить курс" : "Начать курс"}
                     variant={isActiveCourse ? "secondary" : "primary"}
                     pulse={!isCourseInProgress}
                     onPress={() => {
@@ -4165,63 +7894,152 @@ export default function App() {
               );
             })}
 
-            {storyConfigs.map((story) => {
-              const isActive = selectedStory === story.id;
-              const isStoryInProgress = activeProgramMode === "story" && isActive && forestStarted && !forestFinished;
-              const storyIllustration: IllustrationName =
-                story.id === "forest"
-                  ? "forest"
-                  : story.id === "romance"
-                  ? "heart-multiple"
-                  : story.id === "slytherin"
-                  ? "snake"
-                  : story.id === "boss"
-                  ? "briefcase-account-outline"
-                  : "account-heart-outline";
+            {storyPreviewId && previewStoryConfig ? (
+              <AppCard>
+                <AppButton label="Назад к списку квестов" variant="secondary" onPress={() => setStoryPreviewId(null)} />
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.emojiLeading}>{previewStoryConfig.emoji}</Text>
+                  <Text style={styles.cardTitle}>{previewStoryConfig.label}</Text>
+                </View>
+                <Text style={styles.cardText}>{previewStoryConfig.description}</Text>
+                <Text style={styles.cardMeta}>{storyRatingLabel(previewStoryConfig.id)}</Text>
+                <Text style={styles.sectionLabel}>Карта квеста</Text>
+                <View style={styles.stageRoadWrap}>
+                  {previewStorySteps.slice(0, 6).map((step, idx) => (
+                    <View key={`preview-road-${previewStoryConfig.id}-${step.id}`} style={styles.stageRoadNode}>
+                      <View style={[styles.stageDot, styles.stageDotCurrent]}>
+                        <Text style={styles.stageDotText}>{idx + 1}</Text>
+                      </View>
+                      <View style={styles.stageRoadTextWrap}>
+                        <Text style={styles.cardText}>{step.title}</Text>
+                      </View>
+                      {idx < Math.min(5, previewStorySteps.length - 1) && <View style={styles.stageRoadLine} />}
+                    </View>
+                  ))}
+                </View>
+                <AppButton
+                  label={!isAdult18Plus && adultOnlyStories.includes(previewStoryConfig.id) ? "Недоступно (18+)" : `Начать: ${previewStoryConfig.label}`}
+                  disabled={!isAdult18Plus && adultOnlyStories.includes(previewStoryConfig.id)}
+                  onPress={() => startStoryFromCard(previewStoryConfig.id)}
+                />
+              </AppCard>
+            ) : (
+              storyConfigs.map((story) => {
+                const storyTags = getStoryTags(story);
+                const shouldShowStoryByTab =
+                  mapCatalogTab === "all" ||
+                  mapCatalogTab === "quests" ||
+                  (mapCatalogTab === "recommended" && story.id === recommendedStory);
+                const shouldShowStoryByTag = !activeCatalogTag || storyTags.includes(activeCatalogTag);
+                const shouldShowStory = shouldShowStoryByTab && shouldShowStoryByTag;
+                if (!shouldShowStory) {
+                  return null;
+                }
+                const isActive = selectedStory === story.id;
+                const isStoryInProgress = activeProgramMode === "story" && isActive && forestStarted && !forestFinished;
+                const storyStatus = storyStatusById[story.id];
+                const completedEnding = completedStoryEndingById[story.id];
+                const isAdultLocked = !isAdult18Plus && adultOnlyStories.includes(story.id);
+                const storyIllustration: IllustrationName =
+                  story.id === "forest"
+                    ? "forest"
+                    : story.id === "romance"
+                    ? "heart-multiple"
+                    : story.id === "slytherin"
+                    ? "snake"
+                    : story.id === "boss"
+                    ? "briefcase-account-outline"
+                    : story.id === "gryffindor_common_room"
+                    ? "fire-circle"
+                    : story.id === "ravenclaw_common_room"
+                    ? "book-open-page-variant-outline"
+                    : story.id === "hufflepuff_common_room"
+                    ? "flower-outline"
+                    : "account-heart-outline";
 
-              return (
-                <AppCard key={`story-card-${story.id}`}>
-                  <View style={styles.cardTitleRow}>
-                    <Text style={styles.emojiLeading}>{story.emoji}</Text>
-                    <Text style={styles.cardTitle}>{story.label}</Text>
-                  </View>
-                  <CardIllustration name={storyIllustration} />
-                  <Text style={styles.cardText}>{story.description}</Text>
-                  <Text style={styles.cardMeta}>Формат: {story.difficulties.join(" / ")} вопросов</Text>
-                  <Text style={styles.cardMeta}>Формат: отдельный сюжетный квест (не курс).</Text>
-                  {isStoryInProgress && (
-                    <Text style={styles.cardMeta}>
-                      Прогресс сюжета и курса: {questProgressPercent}% ({forestStepIndex + 1}/{currentForestQuestSteps.length})
-                    </Text>
-                  )}
-                  <AppButton
-                    label={
-                      isStoryInProgress ? "Продолжить сюжет" : isActive ? "Начать этот квест" : `Выбрать и начать: ${story.label}`
-                    }
-                    variant={isActive ? "secondary" : "primary"}
-                    onPress={() => {
-                      if (isStoryInProgress) {
-                        setActiveTab("quest");
-                        return;
-                      }
-                      setActiveProgramMode("story");
-                      setSelectedStory(story.id);
-                      setForestStarted(true);
-                      setForestFinished(false);
-                      setForestStepIndex(0);
-                      setStepMessage("");
-                      setTotalErrors(0);
-                      setPenaltyCount(0);
-                      setForestXpEarned(0);
-                      setFirstTrySuccess(0);
-                      setLastStepPraise("");
-                      resetStepUi();
-                      setActiveTab("quest");
-                    }}
-                  />
-                </AppCard>
-              );
-            })}
+                return (
+                  <AppCard key={`story-card-${story.id}`}>
+                    <Pressable onPress={() => openStoryPreview(story.id)} style={styles.storyPreviewTapArea}>
+                      <View style={styles.cardTitleRow}>
+                        <Text style={styles.emojiLeading}>{story.emoji}</Text>
+                        <Text style={styles.cardTitle}>{story.label}</Text>
+                      </View>
+                      <CardIllustration name={storyIllustration} />
+                      <Text style={styles.cardText}>{story.description}</Text>
+                      <View style={styles.tagRow}>
+                        {storyTags.map((tag) => (
+                          <Pressable
+                            key={`${story.id}-${tag}`}
+                            style={[styles.tagPill, activeCatalogTag === tag && styles.storyChipActive]}
+                            onPress={() => toggleCatalogTag(tag)}
+                          >
+                            <Text style={styles.tagPillText}>{tag}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <Text style={styles.cardMeta}>{storyRatingLabel(story.id)}</Text>
+                      {isAdultLocked && <Text style={styles.authError}>Сюжет временно заблокирован для профиля младше 18.</Text>}
+                    </Pressable>
+                    {isStoryInProgress && (
+                      <Text style={styles.cardMeta}>
+                        В процессе: {questProgressPercent}% ({forestStepIndex + 1}/{currentForestQuestSteps.length})
+                      </Text>
+                    )}
+                    {storyStatus === "completed" && completedEnding && (
+                      <View style={styles.completedStoryBox}>
+                        <View style={styles.completedStoryBadge}>
+                          <Feather name="check-circle" size={16} color="#10B981" />
+                          <Text style={styles.completedStoryBadgeText}>Пройдено</Text>
+                        </View>
+                        <Text style={styles.cardMeta}>
+                          Ачивка: {formatAchievementLabel(buildAchievementId(story.id, completedEnding))}
+                        </Text>
+                        <Text style={styles.cardMeta}>{endingNarrativeByRoute(story.id)[completedEnding]}</Text>
+                      </View>
+                    )}
+                    {storyStatus === "completed" ? (
+                      <AppButton
+                        label="Открыть этапы квеста"
+                        variant="secondary"
+                        onPress={() => openStoryFromFeed(story.id, "road")}
+                      />
+                    ) : (
+                      <AppButton
+                        label={
+                          isStoryInProgress
+                            ? "Продолжить сюжет"
+                            : storyStatus === "in_progress"
+                              ? "Открыть сюжет"
+                              : isAdultLocked
+                                ? "Недоступно (18+)"
+                                : "Начать квест"
+                        }
+                        variant={isStoryInProgress || storyStatus !== "not_started" ? "secondary" : "primary"}
+                        disabled={isAdultLocked && storyStatus === "not_started"}
+                        onPress={() => {
+                          if (isStoryInProgress) {
+                            setActiveTab("quest");
+                            return;
+                          }
+                          if (storyStatus === "in_progress") {
+                            openStoryFromFeed(story.id, "continue");
+                            return;
+                          }
+                          startStoryFromCard(story.id);
+                        }}
+                      />
+                    )}
+                  </AppCard>
+                );
+              })
+            )}
+
+            {mapCatalogTab === "quests" && !hasStartedStoriesInCatalog && (
+              <AppCard>
+                <Text style={styles.cardTitle}>Ты еще не начала квесты</Text>
+                <Text style={styles.cardMeta}>Выбери любой сюжет в табе «Всё» или «Рекомендованные», и он появится здесь лентой.</Text>
+              </AppCard>
+            )}
 
             <AppCard>
               <View style={styles.cardTitleRow}>
@@ -4245,37 +8063,139 @@ export default function App() {
               }
               subtitle={activeProgramMode === "course" ? "Отдельный трек переговоров и жизненных ситуаций" : "Сюжетная отработка навыков"}
             />
-            <HeroBanner character={characterLibrary.owlMentor} accentEmoji={uiEmojiLibrary.dialog} title="Сначала слушаем сцену, затем отвечаем" />
+            {activeProgramMode === "story" && (
+              <AppCard>
+                <Text style={styles.sectionLabel}>Твои квесты</Text>
+                {questFeedStories.length ? (
+                  questFeedStories.map((story) => {
+                    const status = storyStatusById[story.id];
+                    const isActiveStory = selectedStory === story.id;
+                    const ending = completedStoryEndingById[story.id];
+                    return (
+                      <View key={`quest-feed-${story.id}`} style={styles.storyFeedRow}>
+                        <View style={styles.storyFeedTextWrap}>
+                          <Text style={styles.cardText}>
+                            {story.emoji} {story.label}
+                          </Text>
+                          <Text style={styles.cardMeta}>
+                            {status === "completed"
+                              ? `Пройдено • ${ending ? endingRouteName[ending] : "финал открыт"}`
+                              : isActiveStory
+                                ? "Текущий сюжет"
+                                : "В процессе"}
+                          </Text>
+                        </View>
+                        {status === "completed" ? (
+                          <View style={styles.storyFeedActions}>
+                            <View style={styles.completedStoryBadgeCompact}>
+                              <Feather name="check-circle" size={16} color="#10B981" />
+                              <Text style={styles.completedStoryBadgeText}>Пройдено</Text>
+                            </View>
+                            <AppButton
+                              label="Этапы"
+                              variant="secondary"
+                              onPress={() => openStoryFromFeed(story.id, "road")}
+                            />
+                          </View>
+                        ) : (
+                          <AppButton
+                            label={isActiveStory ? "Открыт" : "Открыть"}
+                            variant="secondary"
+                            onPress={() => openStoryFromFeed(story.id, "continue")}
+                          />
+                        )}
+                      </View>
+                    );
+                  })
+                ) : (
+                  <Text style={styles.cardMeta}>Ты еще не запустила ни одного квеста с карты.</Text>
+                )}
+              </AppCard>
+            )}
+            <AppCard style={styles.questHeaderProgressCard}>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${episodeProgressPercent}%` }]} />
+              </View>
+              <Text style={styles.cardMeta}>Прогресс эпизода: {effectiveEpisodeProgressPercent}%</Text>
+            </AppCard>
+            {!forestStarted && !forestFinished && stageProgressSummary && (
+              <AppCard>
+                <Text style={styles.sectionLabel}>Промежуточный итог этапа {stageProgressSummary.stageIdx + 1}</Text>
+                <Text style={styles.cardText}>Длительность: ~{stageProgressSummary.durationSec} сек.</Text>
+                <Text style={styles.cardText}>{stageProgressSummary.narrative}</Text>
+                <Text style={styles.cardTitle}>Тактики пользователя в этом этапе</Text>
+                {buildBranchScaleData(stageProgressSummary.tacticUsage).map(({ branch, value, percent }) => (
+                  <View key={`stage-summary-${branch}`} style={styles.scaleRow}>
+                    <View style={styles.scaleHeader}>
+                      <Text style={styles.scaleLabel}>{branchScaleUi[branch].label}</Text>
+                      <Text style={styles.scaleValue}>
+                        {value} • {percent}%
+                      </Text>
+                    </View>
+                    <View style={styles.scaleTrack}>
+                      <View style={[styles.scaleFill, { width: `${percent}%`, backgroundColor: branchScaleUi[branch].color }]} />
+                    </View>
+                  </View>
+                ))}
+                <Text style={styles.cardMeta}>Техническая аналитика этапа сохранена в профиле и админке.</Text>
+              </AppCard>
+            )}
             {!forestStarted && (
               <AppCard>
-                <Text style={styles.sectionLabel}>Твой следующий шаг</Text>
-                <Text style={styles.cardTitle}>Готова к приключению?</Text>
+                <Text style={styles.sectionLabel}>Карта этапов</Text>
+                <Text style={styles.cardTitle}>Дорога прогресса: {activeProgramMode === "course" ? activeCourse.title : activeStoryConfig.label}</Text>
                 <Text style={styles.cardText}>
-                  Это полноценный квест на {selectedDifficulty} вопросов: выбор, мультивыбор и сборка фразы. Первая ошибка в шаге без
-                  штрафа, со второй — штраф XP. Чем выше сложность, тем выгоднее награда.
+                  Иди по сюжету короткими отрезками: один пройденный узел открывает следующий.
                 </Text>
-                <Text style={styles.cardMeta}>Фокус тренировки по стилю: {activePrimaryConflictStyle.focus}</Text>
-                <Text style={styles.cardText}>Персональные микро-упражнения на сегодня:</Text>
-                {(styleMicroExercises[conflictPrimaryStyle] ?? styleMicroExercises.avoiding).map((exercise) => (
-                  <Text key={exercise} style={styles.cardMeta}>
-                    • {exercise}
-                  </Text>
-                ))}
-                <DifficultySelector
-                  selectedDifficulty={selectedDifficulty}
-                  onSelect={setSelectedDifficulty}
-                  showMultiplier
-                  allowedDifficulties={allowedStoryDifficulties}
+                <View style={styles.stageRoadWrap}>
+                  {visibleStageRoadItems.map((stage, idx) => {
+                    const stateLabel = !stage.isPresent
+                      ? "скоро"
+                      : stage.isDone
+                      ? "пройден"
+                      : stage.isCurrent
+                      ? "текущий"
+                      : stage.isAvailable
+                      ? "доступен"
+                      : "закрыт";
+                    const isLocked = !stage.isAvailable || !stage.isPresent;
+                    return (
+                      <View key={`stage-road-${stage.stageIdx}`} style={styles.stageRoadNode}>
+                        <Pressable
+                          disabled={isLocked}
+                          style={[
+                            styles.stageDot,
+                            stage.isDone && styles.stageDotDone,
+                            stage.isCurrent && styles.stageDotCurrent,
+                            isLocked && styles.stageDotLocked,
+                          ]}
+                          onPress={() => openStageFromRoad(stage.stageIdx)}
+                        >
+                          <Text style={styles.stageDotText}>{stage.stageIdx + 1}</Text>
+                        </Pressable>
+                        <View style={styles.stageRoadTextWrap}>
+                          <Text style={styles.cardText}>{stage.title}</Text>
+                          <Text style={styles.cardMeta}>{stateLabel === "текущий" ? "твой текущий узел" : stateLabel}</Text>
+                        </View>
+                        {idx < visibleStageRoadItems.length - 1 && <View style={styles.stageRoadLine} />}
+                      </View>
+                    );
+                  })}
+                </View>
+                <AppButton
+                  label={stageRoadExpanded ? "Свернуть путь" : "Показать весь путь"}
+                  variant="secondary"
+                  onPress={() => setStageRoadExpanded((prev) => !prev)}
                 />
-                <Text style={styles.forecastText}>
-                  Прогноз: +{questForecast.expectedNetXp} XP при 80% точности. Чем выше сложность, тем выше потенциальная выгода.
-                </Text>
-                <AppButton label="Запустить квест" pulse onPress={startForestQuest} />
+                <Text style={styles.cardMeta}>Фокус тренировки по стилю: {activePrimaryConflictStyle.focus}</Text>
               </AppCard>
             )}
 
             {forestStarted && !forestFinished && (
               <AppCard>
+                <View style={styles.stepEmojiWrap}>
+                  <Text style={styles.stepEmojiText}>{activeForestStep.sceneEmoji ?? "🧠"}</Text>
+                </View>
                 {!!lastStepPraise && (
                   <Animated.View
                     style={[
@@ -4293,37 +8213,50 @@ export default function App() {
                     <Text style={styles.praiseText}>✨ {lastStepPraise}</Text>
                   </Animated.View>
                 )}
-                <Text style={styles.sectionLabel}>Текущий прогресс</Text>
-                <View style={styles.cardTitleRow}>
-                  <Text style={styles.emojiLeading}>🌲</Text>
-                  <Text style={styles.cardTitle}>
-                    Шаг {forestStepIndex + 1}/{currentForestQuestSteps.length}: {activeForestStep.title}
-                  </Text>
-                </View>
-                <View style={styles.progressTrack}>
-                  <View style={[styles.progressFill, { width: `${questProgressPercent}%` }]} />
-                </View>
-                <Text style={styles.cardMeta}>
-                  Пройдено: {questProgressPercent}% • Формат: {formatStepType(activeForestStep.type)} • Сложность: {selectedDifficulty} • Ошибки шага:{" "}
-                  {stepErrorCount}/2 • Общие ошибки: {totalErrors}
-                </Text>
-                <View style={styles.stepEmojiWrap}>
-                  <Text style={styles.stepEmojiText}>{activeForestStep.sceneEmoji ?? "🧠"}</Text>
-                </View>
                 <Text style={styles.sectionLabel}>Сцена</Text>
-                <SpeechBubble text={visibleStepScene ?? activeForestStep.scene} />
-                <Text style={styles.sectionLabel}>Что сделать сейчас</Text>
-                <Text style={styles.questInstructionText}>{activeForestStep.instruction}</Text>
+                <Text style={styles.questInstructionText}>{activeForestStep.dispositionText ?? visibleStepScene ?? activeForestStep.scene}</Text>
+                <SpeechBubble
+                  text={activeForestStep.opponentSpeech ?? visibleStepScene ?? activeForestStep.scene}
+                  speakerName={activeForestStep.opponentName}
+                  speakerEmoji={activeForestStep.opponentAvatar ?? activeForestStep.sceneEmoji}
+                />
+                <View style={styles.stepHintActionsRow}>
+                  <Pressable
+                    style={styles.hintIconCircle}
+                    onPress={() => {
+                      playSfx("tap").catch(() => undefined);
+                      openQuestHintBubble(activeForestStep.instruction, "instruction");
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Показать, что сделать сейчас"
+                  >
+                    <Text style={styles.hintIconCircleText}>?</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      playSfx("swipe").catch(() => undefined);
+                      openQuestHintBubble(`Подсказка: ${activeForestStep.hint}`, "hint");
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Показать подсказку"
+                  >
+                    <Text style={styles.hintInlineButtonText}>Подсказка</Text>
+                  </Pressable>
+                </View>
 
                 {activeForestStep.type !== "builder" &&
-                  activeForestStep.options?.map((option, idx) => {
+                  visibleStepOptions.map((option, idx) => {
                     const isMultiple = activeForestStep.type === "multiple";
                     const checked = isMultiple ? selectedMultiple.includes(idx) : selectedSingle === idx;
                     return (
                       <Pressable
                         key={`${activeForestStep.id}-option-${idx}`}
-                        style={[styles.optionCard, checked && styles.optionCardActive]}
+                        style={[
+                          styles.optionCard,
+                          checked && styles.optionCardActive,
+                        ]}
                         onPress={() => {
+                          playSfx("tap").catch(() => undefined);
                           if (isMultiple) {
                             setSelectedMultiple((prev) => {
                               if (prev.includes(idx)) {
@@ -4340,7 +8273,7 @@ export default function App() {
                           setSelectedSingle(idx);
                         }}
                       >
-                        <Text style={styles.optionText}>{option}</Text>
+                        <Text style={styles.optionText}>{applyGenderToPlayerReplica(option, profileGender)}</Text>
                       </Pressable>
                     );
                   })}
@@ -4355,9 +8288,10 @@ export default function App() {
                             <Pressable
                               key={`${token}-built-${idx}`}
                               style={[styles.tokenChip, styles.builtTokenChip]}
-                              onPress={() =>
-                                setSelectedBuilderIndices((prev) => prev.filter((_, tokenIdx) => tokenIdx !== idx))
-                              }
+                              onPress={() => {
+                                playSfx("tap").catch(() => undefined);
+                                setSelectedBuilderIndices((prev) => prev.filter((_, tokenIdx) => tokenIdx !== idx));
+                              }}
                             >
                               <Text style={styles.chipText}>{token}</Text>
                             </Pressable>
@@ -4378,7 +8312,10 @@ export default function App() {
                           <Pressable
                             key={`${token}-${idx}`}
                             style={styles.tokenChip}
-                            onPress={() => setSelectedBuilderIndices((prev) => [...prev, idx])}
+                            onPress={() => {
+                              playSfx("tap").catch(() => undefined);
+                              setSelectedBuilderIndices((prev) => [...prev, idx]);
+                            }}
                           >
                             <Text style={styles.chipText}>{token}</Text>
                           </Pressable>
@@ -4389,31 +8326,28 @@ export default function App() {
                   </View>
                 )}
 
-                {showHint && <Text style={styles.hintText}>Подсказка: {activeForestStep.hint}</Text>}
                 {!!stepMessage && <Text style={styles.statusText}>{stepMessage}</Text>}
 
                 <View style={styles.rowWrap}>
-                  <Pressable style={styles.primaryButtonInline} onPress={evaluateForestStep}>
-                    <Text style={styles.buttonPrimaryText}>Проверить шаг</Text>
-                  </Pressable>
                   <Pressable
-                    style={styles.secondaryButtonInline}
+                    style={styles.primaryButtonInline}
                     onPress={() => {
-                      setShowHint((prev) => {
-                        const next = !prev;
-                        if (next) {
-                          trackAnalyticsEvent("hint_opened", {
-                            stepIndex: forestStepIndex,
-                            details: activeForestStep.id,
-                          }).catch(() => undefined);
-                        }
-                        return next;
-                      });
+                      playSfx("tap").catch(() => undefined);
+                      evaluateForestStep();
                     }}
                   >
-                    <Text style={styles.buttonSecondaryText}>{showHint ? "Скрыть подсказку" : "Подсказка"}</Text>
+                    <Text style={styles.buttonPrimaryText}>Сделать ход</Text>
                   </Pressable>
                 </View>
+                <Modal transparent visible={!!questHintBubbleText} animationType="fade" onRequestClose={closeQuestHintBubble}>
+                  <View style={styles.hintModalRoot}>
+                    <Pressable style={styles.hintModalBackdrop} onPress={closeQuestHintBubble} />
+                    <View style={styles.hintModalBubble}>
+                      <Text style={styles.hintModalTitle}>Подсказка</Text>
+                      <Text style={styles.hintModalText}>{questHintBubbleText}</Text>
+                    </View>
+                  </View>
+                </Modal>
               </AppCard>
             )}
 
@@ -4425,7 +8359,7 @@ export default function App() {
                 </View>
                 <CardIllustration name="trophy-outline" />
                 <Text style={styles.cardText}>Шагов пройдено: {currentForestQuestSteps.length}</Text>
-                <Text style={styles.cardText}>Сложность: {selectedDifficulty} вопросов</Text>
+                <Text style={styles.cardText}>Этапов пройдено: 5/5</Text>
                 <Text style={styles.cardText}>Успехов с 1-й попытки: {firstTrySuccess}</Text>
                 <Text style={styles.cardText}>Ошибок всего: {totalErrors}</Text>
                 <Text style={styles.cardText}>Штрафов применено: {penaltyCount}</Text>
@@ -4433,7 +8367,18 @@ export default function App() {
                   Итог по XP в квесте: {forestXpEarned >= 0 ? "+" : ""}
                   {forestXpEarned} XP
                 </Text>
-                <Text style={styles.cardText}>Финальная концовка: {endingNarrativeByRoute(activeCampaignId)[dominantEndingRoute]}</Text>
+                <Text style={styles.sectionLabel}>История финала</Text>
+                <Text style={styles.cardText}>{questFinalSummary?.story ?? endingNarrativeByRoute(activeCampaignId)[dominantEndingRoute]}</Text>
+                <View style={styles.achievementDetailBox}>
+                  <Text style={styles.cardTitle}>Достижение за концовку</Text>
+                  <Text style={styles.cardText}>
+                    {(questFinalSummary?.achievementIcon ?? "🏅")} {questFinalSummary?.achievementTitle ?? formatAchievementLabel(buildAchievementId(activeCampaignId, dominantEndingRoute))}
+                  </Text>
+                  <Text style={styles.cardMeta}>
+                    {questFinalSummary?.achievementDetails ??
+                      `Награда за финал ${endingRouteName[dominantEndingRoute]} в кампании «${campaignLore[activeCampaignId].title}».`}
+                  </Text>
+                </View>
                 <Text style={styles.sectionLabel}>Результаты по шкалам поведения</Text>
                 {buildBranchScaleData(branchScore).map(({ branch, value, percent }) => (
                   <View key={`scale-${branch}`} style={styles.scaleRow}>
@@ -4448,8 +8393,44 @@ export default function App() {
                     </View>
                   </View>
                 ))}
-                <Text style={styles.cardMeta}>Достижение: {formatAchievementLabel(buildAchievementId(activeCampaignId, dominantEndingRoute))}</Text>
-                <AppButton label="Пройти квест заново" onPress={startForestQuest} />
+                <Text style={styles.cardMeta}>Финал: {questFinalSummary?.endingTitle ?? endingRouteName[dominantEndingRoute]}</Text>
+                {activeProgramMode === "story" && (
+                  <>
+                    <Text style={styles.sectionLabel}>Оцени сценарий</Text>
+                    <View style={styles.ratingOptionsWrap}>
+                      {storyRatingOptions.map((rating) => {
+                        const active = pendingStoryRating === rating;
+                        return (
+                          <Pressable
+                            key={`rating-${rating}`}
+                            style={[styles.ratingChip, active && styles.ratingChipActive]}
+                            onPress={() => {
+                              if (ratingVoteLocked) {
+                                return;
+                              }
+                              setPendingStoryRating(rating);
+                            }}
+                          >
+                            <Text style={styles.cardMeta}>{rating.toFixed(1).replace(".", ",")}★</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <AppButton
+                      label={ratingVoteLocked ? "Оценка отправлена" : "Оценить сценарий"}
+                      variant={ratingVoteLocked ? "secondary" : "primary"}
+                      onPress={submitStoryRating}
+                    />
+                  </>
+                )}
+                <AppButton
+                  label="Перейти к карте квестов"
+                  variant="secondary"
+                  onPress={() => {
+                    setForestStarted(false);
+                    setActiveTab("map");
+                  }}
+                />
               </AppCard>
             )}
           </ScrollView>
@@ -4457,7 +8438,7 @@ export default function App() {
 
         {activeTab === "event" && (
           <ScrollView contentContainerStyle={styles.scroll}>
-            <ScreenHeading title="Сезонный Ивент" subtitle="Месяц Осознанной Коммуникации" />
+            <ScreenHeading title={seasonalEventMvp.seasonLabel} subtitle={seasonalEventMvp.title} />
             <HeroBanner character={characterLibrary.wolfStrategist} accentEmoji={uiEmojiLibrary.streak} title="Командный прогресс и награды" />
             <AppCard>
               <View style={styles.cardTitleRow}>
@@ -4465,13 +8446,127 @@ export default function App() {
                 <Text style={styles.cardTitle}>Прогресс сообщества</Text>
               </View>
               <CardIllustration name="trophy-outline" />
-              <Text style={styles.cardText}>74% до открытия легендарного артефакта "Сердце Леса".</Text>
-              <Text style={styles.cardText}>Твой вклад: {completedCount * 12} очков рефлексии.</Text>
-              <AppButton
-                label={eventJoined ? "Ты уже в ивенте" : "Вступить в ивент"}
-                variant={eventJoined ? "secondary" : "primary"}
-                onPress={() => setEventJoined(true)}
-              />
+              <Text style={styles.cardText}>{seasonalEventMvp.communityGoalText}</Text>
+              <Text style={styles.cardMeta}>Шагов пройдено: {eventCompletedCount}/{eventSteps.length} • {eventProgressPercent}%</Text>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.max(0, Math.min(100, eventProgressPercent))}%` }]} />
+              </View>
+              <Text style={styles.cardMeta}>
+                Накоплено в ивенте: +{eventProgress.xpEarned} XP и +{eventProgress.energyEarned} энергии.
+              </Text>
+              {!eventProgress.joined ? (
+                <AppButton label="Вступить в ивент" onPress={startSeasonEvent} />
+              ) : eventProgress.finished ? (
+                <>
+                  <Text style={styles.cardText}>Ивент завершен. {seasonalEventMvp.completionReward.badge}</Text>
+                  <Text style={styles.cardMeta}>
+                    Финальная награда: +{seasonalEventMvp.completionReward.xp} XP и +{seasonalEventMvp.completionReward.energy} энергии.
+                  </Text>
+                  <AppButton
+                    label={eventProgress.rewardClaimed ? "Награда уже получена" : "Забрать финальную награду"}
+                    variant={eventProgress.rewardClaimed ? "secondary" : "primary"}
+                    onPress={claimSeasonEventReward}
+                    style={styles.profileEconomyButton}
+                  />
+                  <AppButton label="Перезапустить сезон" variant="secondary" onPress={startSeasonEvent} style={styles.profileEconomyButton} />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.sectionLabel}>Текущая сцена</Text>
+                  <Text style={styles.questInstructionText}>{activeEventStep?.scene}</Text>
+                  <Text style={styles.sectionLabel}>Что сделать сейчас</Text>
+                  <Text style={styles.questInstructionText}>{activeEventStep?.instruction}</Text>
+
+                  {activeEventStep?.type !== "builder" &&
+                    activeEventStep?.options?.map((option, idx) => {
+                      const isMultiple = activeEventStep.type === "multiple";
+                      const checked = isMultiple ? eventSelectedMultiple.includes(idx) : eventSelectedSingle === idx;
+                      return (
+                        <Pressable
+                          key={`${activeEventStep.id}-event-option-${idx}`}
+                          style={[
+                            styles.optionCard,
+                            checked && styles.optionCardActive,
+                            eventWrongSingleIndex === idx && styles.optionCardWrong,
+                          ]}
+                          onPress={() => {
+                            setEventWrongSingleIndex(null);
+                            if (isMultiple) {
+                              setEventSelectedMultiple((prev) => {
+                                if (prev.includes(idx)) {
+                                  return prev.filter((value) => value !== idx);
+                                }
+                                const needed = activeEventStep.correctMultiple?.length ?? 2;
+                                if (prev.length >= needed) {
+                                  return prev;
+                                }
+                                return [...prev, idx];
+                              });
+                              return;
+                            }
+                            setEventSelectedSingle(idx);
+                          }}
+                        >
+                          <Text style={styles.optionText}>{option}</Text>
+                        </Pressable>
+                      );
+                    })}
+
+                  {activeEventStep?.type === "builder" && (
+                    <View style={styles.builderWrap}>
+                      <Text style={styles.cardMeta}>Собранная фраза (тапни слово, чтобы убрать)</Text>
+                      <View style={styles.builderLine}>
+                        {eventBuilderTokens.length ? (
+                          <View style={styles.rowWrap}>
+                            {eventBuilderTokens.map((token, idx) => (
+                              <Pressable
+                                key={`${activeEventStep.id}-built-${token}-${idx}`}
+                                style={[styles.tokenChip, styles.builtTokenChip]}
+                                onPress={() =>
+                                  setEventSelectedBuilderIndices((prev) => prev.filter((_, tokenIdx) => tokenIdx !== idx))
+                                }
+                              >
+                                <Text style={styles.cardMeta}>{token}</Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        ) : (
+                          <Text style={styles.cardMeta}>Пока пусто — набери фразу снизу.</Text>
+                        )}
+                      </View>
+                      <Text style={styles.cardMeta}>Банк слов</Text>
+                      <View style={styles.rowWrap}>
+                        {eventShuffledTokenBank.map((token, idx) => {
+                          if (eventSelectedBuilderIndices.includes(idx)) {
+                            return null;
+                          }
+                          return (
+                            <Pressable
+                              key={`${activeEventStep.id}-bank-${token}-${idx}`}
+                              style={styles.tokenChip}
+                              onPress={() => setEventSelectedBuilderIndices((prev) => [...prev, idx])}
+                            >
+                              <Text style={styles.cardMeta}>{token}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
+
+                  {!!eventShowHint && <Text style={styles.hintText}>Подсказка: {activeEventStep?.hint}</Text>}
+                  <Text style={styles.statusText}>{eventStepMessage}</Text>
+                  <View style={styles.profileEconomyActionStack}>
+                    <AppButton label="Сделать ход" onPress={evaluateSeasonEventStep} style={styles.profileEconomyButton} />
+                    <AppButton
+                      label={eventShowHint ? "Скрыть подсказку" : "Показать подсказку"}
+                      variant="secondary"
+                      style={styles.profileEconomyButton}
+                      onPress={() => setEventShowHint((prev) => !prev)}
+                    />
+                  </View>
+                </>
+              )}
             </AppCard>
           </ScrollView>
         )}
@@ -4502,32 +8597,296 @@ export default function App() {
             <HeroBanner character={characterLibrary.swanEmpath} accentEmoji={uiEmojiLibrary.growth} title="Твой стиль, прогресс и подходящие курсы" />
             <AppCard>
               <View style={styles.profileHeader}>
-                <ImageFallback label="Аватар" size={imageSizes.profileAvatar} />
+                <View style={styles.profileAvatarControlRow}>
+                  <Pressable
+                    onPress={() => {
+                      if (!avatarUri) {
+                        pickAvatarFromLibrary();
+                      }
+                    }}
+                    style={styles.profileAvatarPressable}
+                  >
+                    {avatarUri ? (
+                      <Image source={{ uri: avatarUri }} style={styles.profileAvatarImage} />
+                    ) : (
+                      <ImageFallback label="Аватар" size={imageSizes.profileAvatar} />
+                    )}
+                  </Pressable>
+                  {avatarUri && (
+                    <View style={styles.profileAvatarActionColumn}>
+                      <Pressable style={styles.profileAvatarActionButton} onPress={clearProfileAvatar}>
+                        <Feather name="trash-2" size={16} color={colors.textPrimary} />
+                      </Pressable>
+                      <Pressable style={styles.profileAvatarActionButton} onPress={pickAvatarFromLibrary}>
+                        <Feather name="plus" size={16} color={colors.textPrimary} />
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
                 <View style={styles.profileInfo}>
                   <Text style={styles.cardTitle}>Текущий ранг</Text>
                   <Text style={styles.cardText}>Новичок-Наблюдатель</Text>
                   <Text style={styles.cardMeta}>{currentUserEmail}</Text>
                 </View>
               </View>
+              {needsProfileSetup && (
+                <View style={styles.achievementDetailBox}>
+                  <Text style={styles.cardText}>Давай познакомимся: как тебя называть?</Text>
+                  <TextInput
+                    value={profileNameDraft}
+                    onChangeText={setProfileNameDraft}
+                    placeholder="Имя или ник"
+                    placeholderTextColor={colors.textSecondary}
+                    style={styles.promoInput}
+                  />
+                  <AppButton label="Сохранить имя" onPress={saveProfileIdentity} />
+                </View>
+              )}
+              {!needsProfileSetup && (
+                <Text style={styles.cardText}>Игрок: {displayName}</Text>
+              )}
               <Text style={styles.cardText}>Рекорд глубины рефлексии: 82/100</Text>
               <Text style={styles.cardMeta}>{isSavingProfile ? "Сохраняем прогресс..." : "Прогресс сохранен локально"}</Text>
               <Text style={styles.cardMeta}>Открыто концовок: {unlockedEndings.length}</Text>
               <Text style={styles.cardMeta}>Достижений: {unlockedAchievements.length}</Text>
+              <Text style={styles.cardMeta}>Звук в игре: {soundEnabled ? "включен" : "выключен"}</Text>
+              <Text style={styles.cardMeta}>Streak: {streak} дн.</Text>
+              <AppButton
+                label={soundEnabled ? "Выключить звук" : "Включить звук"}
+                variant="secondary"
+                onPress={() => {
+                  playSfx("tap").catch(() => undefined);
+                  setSoundEnabled((prev) => !prev);
+                }}
+              />
               <AppButton label="Выйти из аккаунта" variant="secondary" onPress={handleLogout} />
             </AppCard>
 
             <AppCard>
-              <Text style={styles.sectionLabel}>Коллекция достижений</Text>
-              <Text style={styles.cardTitle}>Финалы LitRPG</Text>
-              {unlockedAchievements.length ? (
-                unlockedAchievements.slice(-12).reverse().map((item) => (
-                  <Text key={item} style={styles.cardMeta}>
-                    • {formatAchievementLabel(item)}
+              <Text style={styles.sectionLabel}>Экономика игрока</Text>
+              <ClaimRewardButton
+                label={canClaimDailyEnergy ? `Забрать daily +${ENERGY_DAILY_BONUS}` : "Daily получен"}
+                onPress={claimDailyEnergy}
+                canClaim={canClaimDailyEnergy && !isClaimingDailyEnergy}
+                style={styles.profileEconomyButton}
+              />
+              <Text style={styles.cardTitle}>XP и энергия</Text>
+              <Text style={styles.cardText}>XP: {animatedXp} • Энергия: {animatedEnergy}</Text>
+              <Text style={styles.cardMeta}>
+                Первые {FREE_STAGES_PER_CAMPAIGN} этапа в квесте бесплатны, дальше — {currentStageCost} энергии за этап.
+              </Text>
+              <View style={styles.profileEconomyActionStack}>
+                <AppButton
+                  label="Пополнить (RuStore Wallet) +120"
+                  onPress={() => {
+                    grantEnergy(120, "wallet_rustore_mock");
+                    setPromoInfo("Пополнение через RuStore Wallet (mock): +120 энергии.");
+                  }}
+                  style={styles.profileEconomyButton}
+                />
+                <AppButton
+                  label="Пополнить (YooKassa) +340"
+                  variant="secondary"
+                  onPress={() => {
+                    grantEnergy(340, "wallet_yookassa_mock");
+                    setPromoInfo("Пополнение через YooKassa (mock): +340 энергии.");
+                  }}
+                  style={styles.profileEconomyButton}
+                />
+              </View>
+              <TextInput
+                value={promoCodeInput}
+                onChangeText={setPromoCodeInput}
+                placeholder="Промокод"
+                placeholderTextColor={colors.textSecondary}
+                style={styles.promoInput}
+              />
+              <AppButton
+                label="Активировать промокод"
+                variant="secondary"
+                onPress={redeemPromoCode}
+                style={styles.profileEconomyButton}
+              />
+              <View style={styles.profileEconomyActionStack}>
+                <AppButton
+                  label={`Реферал завершен +${ENERGY_REFERRAL_BONUS}`}
+                  variant="secondary"
+                  onPress={completeReferralInvite}
+                  style={styles.profileEconomyButton}
+                />
+                <Text style={styles.cardMeta}>Подтвержденных приглашений: {referralInvitesCompleted}</Text>
+              </View>
+              <TextInput
+                value={transferAmountInput}
+                onChangeText={setTransferAmountInput}
+                placeholder="Сколько отправить другу"
+                placeholderTextColor={colors.textSecondary}
+                keyboardType="numeric"
+                style={styles.promoInput}
+              />
+              <Text style={styles.cardMeta}>Кому отправить</Text>
+              {friendEmails.length ? (
+                <View style={styles.rowWrap}>
+                  {friendEmails.map((email) => {
+                    const selected = selectedFriendEmail === email;
+                    return (
+                      <Pressable
+                        key={`transfer-friend-${email}`}
+                        style={[styles.storyChip, selected && styles.storyChipActive]}
+                        onPress={() => setSelectedFriendEmail(email)}
+                      >
+                        <Text style={styles.chipText}>{friendProfiles[email]?.displayName ?? email}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={styles.cardMeta}>Список друзей пока пуст. Добавь друга ниже.</Text>
+              )}
+              <TransferActionButton
+                label="Отправить энергию другу"
+                onPress={sendEnergyToFriend}
+                enabled={canSendEnergyToFriend}
+                style={styles.profileEconomyButton}
+              />
+              {!!promoInfo && <Text style={styles.cardMeta}>{promoInfo}</Text>}
+            </AppCard>
+
+            <AppCard>
+              <Text style={styles.sectionLabel}>Друзья</Text>
+              <Text style={styles.cardTitle}>Добавить друга</Text>
+              <TextInput
+                value={friendEmailInput}
+                onChangeText={setFriendEmailInput}
+                placeholder="Email друга"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.promoInput}
+              />
+              <AppButton label="Добавить друга" variant="secondary" onPress={addFriendByEmail} style={styles.profileEconomyButton} />
+              <Text style={styles.cardMeta}>Друзей: {friendEmails.length}</Text>
+              <View style={styles.rowWrap}>
+                {friendEmails.map((email) => (
+                  <Pressable
+                    key={`friend-open-${email}`}
+                    style={[styles.storyChip, openedFriendEmail === email && styles.storyChipActive]}
+                    onPress={() => setOpenedFriendEmail((prev) => (prev === email ? null : email))}
+                  >
+                    <Text style={styles.chipText}>{friendProfiles[email]?.displayName ?? email}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {openedFriendEmail && openedFriendProfile && (
+                <View style={styles.achievementDetailBox}>
+                  <Text style={styles.cardText}>{openedFriendProfile.displayName}</Text>
+                  <Text style={styles.cardMeta}>{openedFriendEmail}</Text>
+                  <Text style={styles.cardMeta}>{openedFriendProfile.aboutMe}</Text>
+                  <Text style={styles.cardMeta}>
+                    XP: {openedFriendProfile.xp} • Энергия: {openedFriendProfile.energy} • Завершено квестов:{" "}
+                    {openedFriendProfile.completedCount}
                   </Text>
-                ))
+                  <Text style={styles.cardMeta}>
+                    Стиль коммуникации: {conflictStyles.find((style) => style.id === openedFriendProfile.conflictPrimaryStyle)?.label ?? "—"}
+                  </Text>
+                </View>
+              )}
+            </AppCard>
+
+            <AppCard>
+              <Text style={styles.sectionLabel}>Статистика ошибок и ответов</Text>
+              <Text style={styles.cardText}>
+                Верные ответы: {practiceStats.answersCorrect} • Неверные ответы: {practiceStats.answersIncorrect}
+              </Text>
+              <Text style={styles.cardMeta}>
+                Самый частый тип ошибки: {topPracticeError ? `${formatErrorTypeLabelRu(topPracticeError[0])} (${topPracticeError[1]})` : "пока нет"}
+              </Text>
+              {Object.entries(practiceStats.wrongTacticByType)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([tactic, count]) => (
+                  <Text key={`wrong-tactic-${tactic}`} style={styles.cardMeta}>
+                    • Тактика «{formatTacticLabelRu(tactic)}»: {count}
+                  </Text>
+                ))}
+              {!!wrongTacticScaleData.length && (
+                <>
+                  <Text style={styles.cardTitle}>Шкалы повторяемости стиля ошибок</Text>
+                  {wrongTacticScaleData.map(({ branch, value, percent }) => (
+                    <View key={`wrong-scale-${branch}`} style={styles.scaleRow}>
+                      <View style={styles.scaleHeader}>
+                        <Text style={styles.scaleLabel}>{branchScaleUi[branch].label}</Text>
+                        <Text style={styles.scaleValue}>
+                          {value} • {percent}%
+                        </Text>
+                      </View>
+                      <View style={styles.scaleTrack}>
+                        <View style={[styles.scaleFill, { width: `${percent}%`, backgroundColor: branchScaleUi[branch].color }]} />
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
+              <Text style={styles.sectionLabel}>Тех-аналитика по типам ошибок</Text>
+              {Object.entries(practiceStats.errorByType)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 6)
+                .map(([errorType, count]) => (
+                  <Text key={`error-type-${errorType}`} style={styles.cardMeta}>
+                    • {formatErrorTypeLabelRu(errorType)}: {count}
+                  </Text>
+                ))}
+              {!Object.keys(practiceStats.errorByType).length && (
+                <Text style={styles.cardMeta}>Пока нет накопленных данных по типам ошибок.</Text>
+              )}
+              {repeatedErrorCourse ? (
+                <>
+                  <Text style={styles.cardText}>
+                    Повтор ошибки более 7 раз. Рекомендован спец-курс: {repeatedErrorCourse.title}
+                  </Text>
+                  <AppButton
+                    label={`Открыть курс: ${repeatedErrorCourse.title}`}
+                    onPress={() => {
+                      activateCourse(repeatedErrorCourse);
+                      setActiveTab("map");
+                    }}
+                  />
+                </>
+              ) : (
+                <Text style={styles.cardMeta}>Когда один тип ошибки повторится более 7 раз, здесь появится спец-курс.</Text>
+              )}
+            </AppCard>
+
+            <AppCard>
+              <Text style={styles.sectionLabel}>Коллекция достижений</Text>
+              <Text style={styles.cardTitle}>Финалы</Text>
+              {achievementItems.length ? (
+                <View style={styles.achievementGrid}>
+                  {achievementItems.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      style={[
+                        styles.achievementIconButton,
+                        openAchievementId === item.id && styles.achievementIconButtonActive,
+                      ]}
+                      onPress={() => setOpenAchievementId((prev) => (prev === item.id ? null : item.id))}
+                    >
+                      <Text style={styles.achievementIconEmoji}>{item.icon}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               ) : (
                 <Text style={styles.cardMeta}>Пока нет. Заверши кампанию, чтобы открыть первую концовку.</Text>
               )}
+              {openAchievementId &&
+                achievementItems
+                  .filter((item) => item.id === openAchievementId)
+                  .map((item) => (
+                    <View key={`detail-${item.id}`} style={styles.achievementDetailBox}>
+                      <Text style={styles.cardText}>{item.title}</Text>
+                      <Text style={styles.cardMeta}>{item.details}</Text>
+                    </View>
+                  ))}
             </AppCard>
 
 
@@ -4606,71 +8965,144 @@ export default function App() {
           </ScrollView>
         )}
 
-        {activeTab === "admin" && (
+        {activeTab === "admin" && currentUserRole === "ADMIN" && (
           <ScrollView contentContainerStyle={styles.scroll}>
             <ScreenHeading title="Веб-админка аналитики" subtitle="Системная воронка по каждому пользователю" />
             <HeroBanner character={characterLibrary.lynxAnalyst} accentEmoji={uiEmojiLibrary.strategy} title="Смотри вход, тест, прогресс, отказы и время" />
             <AppCard>
               <Text style={styles.sectionLabel}>Обзор</Text>
-              <Text style={styles.cardText}>Пользователей: {analyticsUsers.length}</Text>
+              <Text style={styles.cardText}>Пользователей: {adminUsers.length}</Text>
               <Text style={styles.cardText}>
                 Активные сессии:{" "}
-                {analyticsUsers.filter(([, data]) => {
-                  const last = Date.parse(data.lastSeenAt);
+                {adminUsers.filter((user) => {
+                  const last = Date.parse(user.analytics.lastSeenAt);
                   return Number.isFinite(last) && Date.now() - last < 15 * 60 * 1000;
                 }).length}
               </Text>
+              <TextInput
+                value={adminUserSearch}
+                onChangeText={setAdminUserSearch}
+                placeholder="Поиск по email"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.promoInput}
+              />
+              {!!adminActionMessage && <Text style={styles.authSuccess}>{adminActionMessage}</Text>}
               <AppButton label="Обновить аналитику" variant="secondary" onPress={() => refreshAnalyticsSnapshot()} />
             </AppCard>
 
-            {analyticsUsers.map(([email, data]) => {
+            {filteredAdminUsers.map((user) => {
+              const email = user.email;
+              const data = user.analytics;
+              const isExpanded = expandedAdminEmail === email;
               const testAnswers = data.diagnosticAnswers.length;
               const recentEvents = data.events.slice(-5).reverse();
               const completionRate = data.counters.courseStarts
                 ? Math.round((data.counters.courseCompletions / data.counters.courseStarts) * 100)
                 : 0;
+              const currentGrantAmount = adminGrantAmountByEmail[email] ?? "10";
               return (
                 <AppCard key={`analytics-${email}`}>
-                  <Text style={styles.cardTitle}>{email}</Text>
-                  <Text style={styles.cardMeta}>Первый вход: {new Date(data.firstSeenAt).toLocaleString()}</Text>
-                  <Text style={styles.cardMeta}>Последняя активность: {new Date(data.lastSeenAt).toLocaleString()}</Text>
-                  <Text style={styles.cardText}>Сессий: {data.totalSessions} • Время в приложении: {Math.round(data.totalTimeSec / 60)} мин</Text>
-                  <Text style={styles.cardMeta}>
-                    Курсы: старт {data.counters.courseStarts} / финиш {data.counters.courseCompletions} ({completionRate}%)
-                  </Text>
-                  <Text style={styles.cardMeta}>
-                    Квесты: старт {data.counters.questStarts} / финиш {data.counters.questCompletions}
-                  </Text>
-                  <Text style={styles.cardMeta}>
-                    Триггеры: ошибки {data.counters.stepFails}, штрафы {data.counters.penalties}, отказы {data.counters.dropOffs}
-                  </Text>
-                  <Text style={styles.cardMeta}>
-                    LitRPG: смен ветки {data.events.filter((event) => event.type === "branch_shift").length}, открыто концовок{" "}
-                    {data.events.filter((event) => event.type === "ending_unlock").length}
-                  </Text>
-                  <Text style={styles.cardMeta}>Ответов в диагностике: {testAnswers}</Text>
-                  {!!testAnswers && (
-                    <Text style={styles.cardMeta}>
-                      Последний ответ теста: {
-                        data.diagnosticAnswers[data.diagnosticAnswers.length - 1]
-                          ? `${data.diagnosticAnswers[data.diagnosticAnswers.length - 1].questionId} -> ${data.diagnosticAnswers[data.diagnosticAnswers.length - 1].style}`
-                          : "-"
-                      }
-                    </Text>
-                  )}
-                  <Text style={styles.sectionLabel}>Последние события</Text>
-                  {recentEvents.length ? (
-                    recentEvents.map((event) => (
-                      <Text key={event.id} style={styles.cardMeta}>
-                        • {event.type} — {new Date(event.at).toLocaleTimeString()} {event.details ? `(${event.details})` : ""}
+                  <View style={styles.adminCardHeader}>
+                    <View style={styles.adminCardHeadMain}>
+                      <Text style={styles.cardTitle}>{email}</Text>
+                      <Text style={styles.cardMeta}>Роль: {user.role} • XP: {user.xp} • Энергия: {user.energy}</Text>
+                    </View>
+                    <AppButton
+                      label={isExpanded ? "Свернуть" : "Развернуть"}
+                      variant="secondary"
+                      style={styles.adminExpandButton}
+                      onPress={() => setExpandedAdminEmail((prev) => (prev === email ? null : email))}
+                    />
+                  </View>
+
+                  {isExpanded && (
+                    <>
+                      <View style={styles.adminGrantRow}>
+                        <TextInput
+                          value={currentGrantAmount}
+                          onChangeText={(value) => setAdminGrantAmountByEmail((prev) => ({ ...prev, [email]: value }))}
+                          keyboardType="numeric"
+                          placeholder="amount"
+                          placeholderTextColor={colors.textSecondary}
+                          style={[styles.promoInput, styles.adminGrantInput]}
+                        />
+                        <AppButton label="Отсыпать" onPress={() => grantEnergyFromAdmin(email)} style={styles.adminGrantButton} />
+                      </View>
+                      <Text style={styles.cardMeta}>Первый вход: {new Date(data.firstSeenAt).toLocaleString()}</Text>
+                      <Text style={styles.cardMeta}>Последняя активность: {new Date(data.lastSeenAt).toLocaleString()}</Text>
+                      <Text style={styles.cardText}>Сессий: {data.totalSessions} • Время в приложении: {Math.round(data.totalTimeSec / 60)} мин</Text>
+                      <Text style={styles.cardMeta}>
+                        Курсы: старт {data.counters.courseStarts} / финиш {data.counters.courseCompletions} ({completionRate}%)
                       </Text>
-                    ))
-                  ) : (
-                    <Text style={styles.cardMeta}>Событий пока нет.</Text>
+                      <Text style={styles.cardMeta}>
+                        Квесты: старт {data.counters.questStarts} / финиш {data.counters.questCompletions}
+                      </Text>
+                      <Text style={styles.cardMeta}>
+                        Этапы: старт {data.counters.stageStarts} / финиш {data.counters.stageCompletions}
+                      </Text>
+                      <Text style={styles.cardMeta}>
+                        Триггеры: ошибки {data.counters.stepFails}, штрафы {data.counters.penalties}, отказы {data.counters.dropOffs}
+                      </Text>
+                      <Text style={styles.cardMeta}>
+                        LitRPG: смен ветки {data.events.filter((event) => event.type === "branch_shift").length}, открыто концовок{" "}
+                        {data.events.filter((event) => event.type === "ending_unlock").length}
+                      </Text>
+                      <Text style={styles.cardMeta}>Ответов в диагностике: {testAnswers}</Text>
+                      <Text style={styles.sectionLabel}>Ошибки по типам (включая прощенные)</Text>
+                      {Object.entries(data.answerByErrorType ?? {})
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 8)
+                        .map(([errorType, count]) => (
+                          <Text key={`${email}-err-${errorType}`} style={styles.cardMeta}>
+                            • {errorType}: {count}
+                          </Text>
+                        ))}
+                      {!Object.keys(data.answerByErrorType ?? {}).length && (
+                        <Text style={styles.cardMeta}>По этому пользователю пока нет детализации ошибок.</Text>
+                      )}
+                      <Text style={styles.sectionLabel}>Тактики (ошибочные выборы)</Text>
+                      {Object.entries(data.answerByTactic ?? {})
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 8)
+                        .map(([tactic, count]) => (
+                          <Text key={`${email}-tactic-${tactic}`} style={styles.cardMeta}>
+                            • {tactic}: {count}
+                          </Text>
+                        ))}
+                      {!Object.keys(data.answerByTactic ?? {}).length && (
+                        <Text style={styles.cardMeta}>По тактикам пока нет данных.</Text>
+                      )}
+                      {!!testAnswers && (
+                        <Text style={styles.cardMeta}>
+                          Последний ответ теста: {
+                            data.diagnosticAnswers[data.diagnosticAnswers.length - 1]
+                              ? `${data.diagnosticAnswers[data.diagnosticAnswers.length - 1].questionId} -> ${data.diagnosticAnswers[data.diagnosticAnswers.length - 1].style}`
+                              : "-"
+                          }
+                        </Text>
+                      )}
+                      <Text style={styles.sectionLabel}>Последние события</Text>
+                      {recentEvents.length ? (
+                        recentEvents.map((event) => (
+                          <Text key={event.id} style={styles.cardMeta}>
+                            • {event.type} — {new Date(event.at).toLocaleTimeString()} {event.details ? `(${event.details})` : ""}
+                          </Text>
+                        ))
+                      ) : (
+                        <Text style={styles.cardMeta}>Событий пока нет.</Text>
+                      )}
+                    </>
                   )}
                 </AppCard>
               );
             })}
+            {!filteredAdminUsers.length && (
+              <AppCard>
+                <Text style={styles.cardText}>По этому email ничего не найдено.</Text>
+              </AppCard>
+            )}
 
             <AppCard>
               <Text style={styles.sectionLabel}>Справка (скрыто из продукта)</Text>
@@ -4702,7 +9134,7 @@ export default function App() {
       </View>
 
       <View style={styles.tabBar}>
-        {tabs.map((tab) => (
+        {visibleTabs.map((tab) => (
           <Pressable
             key={tab.key}
             style={styles.tabButton}
@@ -4967,6 +9399,12 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     ...theme.typography.cardTitle,
   },
+  questStepTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: "600",
+    lineHeight: 22,
+  },
   cardIllustrationWrap: {
     width: imageSizes.cardIllustration,
     height: imageSizes.cardIllustration,
@@ -5001,8 +9439,15 @@ const styles = StyleSheet.create({
     ...theme.typography.body,
     lineHeight: 24,
   },
+  questHeaderProgressCard: {
+    paddingTop: theme.spacing.md,
+    paddingBottom: theme.spacing.md,
+  },
   dailyTaskCard: {
     backgroundColor: "#132A3F",
+  },
+  catalogStickyCard: {
+    backgroundColor: colors.card,
   },
   dailyTaskText: {
     color: colors.textPrimary,
@@ -5068,6 +9513,15 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
     backgroundColor: colors.surfaceMuted,
   },
+  promoInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: theme.radius.sm,
+    color: colors.textPrimary,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
   buttonBase: {
     borderRadius: theme.radius.sm,
     paddingVertical: theme.spacing.lg,
@@ -5075,6 +9529,14 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     opacity: 0.92,
+  },
+  buttonDisabled: {
+    backgroundColor: "#2A3240",
+    borderColor: "#3A4454",
+    opacity: 0.85,
+  },
+  buttonDisabledText: {
+    color: "#8A95A8",
   },
   buttonPrimary: {
     backgroundColor: colors.accent,
@@ -5088,6 +9550,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  buttonSecondaryActive: {
+    borderColor: colors.accent,
+  },
   buttonSecondaryText: {
     color: colors.textSecondary,
     ...theme.typography.caption,
@@ -5097,6 +9562,43 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  profileEconomyActionStack: {
+    flexDirection: "column",
+    gap: 8,
+  },
+  profileEconomyButton: {
+    width: "100%",
+  },
+  claimRewardButtonReady: {
+    marginTop: -10,
+    marginBottom: 6,
+    shadowColor: "#7CF5D0",
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 9,
+  },
+  claimRewardButtonIdle: {
+    marginTop: -10,
+    marginBottom: 6,
+  },
+  ratingOptionsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  ratingChip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: colors.surfaceMuted,
+  },
+  ratingChipActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
   },
   chip: {
     borderWidth: 1,
@@ -5163,6 +9665,78 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  profileAvatarControlRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  profileAvatarPressable: {
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  profileAvatarImage: {
+    width: imageSizes.profileAvatar,
+    height: imageSizes.profileAvatar,
+    borderRadius: 999,
+  },
+  profileAvatarActionColumn: {
+    gap: 8,
+    justifyContent: "center",
+  },
+  profileAvatarActionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storyPreviewTapArea: {
+    gap: 8,
+  },
+  storyFeedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  storyFeedTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  storyFeedActions: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
+  completedStoryBox: {
+    marginTop: 6,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#1D5B43",
+    backgroundColor: "rgba(16, 185, 129, 0.08)",
+    borderRadius: theme.radius.md,
+    padding: 10,
+  },
+  completedStoryBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  completedStoryBadgeCompact: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  completedStoryBadgeText: {
+    color: "#34D399",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   optionCard: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -5174,22 +9748,27 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     backgroundColor: colors.accentSoft,
   },
+  optionCardWrong: {
+    borderColor: "#F87171",
+    borderWidth: 2,
+    backgroundColor: "rgba(248, 113, 113, 0.12)",
+  },
   optionText: {
     color: colors.textPrimary,
     fontSize: 13,
     lineHeight: 19,
   },
   praiseText: {
-    color: "#CCF5D5",
+    color: "#D8F2E0",
     backgroundColor: "#1E3A2A",
     borderWidth: 1,
     borderColor: "#2E6A47",
     borderRadius: theme.radius.sm,
     paddingHorizontal: theme.spacing.md,
     paddingVertical: theme.spacing.sm,
-    fontSize: 13,
-    fontWeight: "600",
-    lineHeight: 18,
+    fontSize: 14,
+    fontWeight: "400",
+    lineHeight: 20,
   },
   successWrap: {
     alignSelf: "stretch",
@@ -5218,9 +9797,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   speechBubbleHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
     marginBottom: 4,
     marginLeft: 2,
   },
@@ -5230,18 +9806,39 @@ const styles = StyleSheet.create({
   speechSpeakerName: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "400",
     letterSpacing: 0.2,
   },
+  speechBubbleColumn: {
+    flex: 1,
+  },
   speechBubble: {
-    alignSelf: "flex-start",
-    maxWidth: "95%",
+    flex: 1,
     backgroundColor: "#16314A",
     borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  speechBubbleRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  speechAvatarWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  speechAvatarEmoji: {
+    fontSize: 18,
   },
   speechBubbleText: {
     color: colors.textPrimary,
@@ -5250,7 +9847,7 @@ const styles = StyleSheet.create({
     lineHeight: 23,
   },
   speechBubbleTail: {
-    marginLeft: 16,
+    marginLeft: 58,
     marginTop: -1,
     width: 0,
     height: 0,
@@ -5266,6 +9863,120 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     lineHeight: 22,
+  },
+  stepHintActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+  },
+  hintIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hintIconCircleText: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  hintInlineButtonText: {
+    color: "#9BC0FF",
+    fontSize: 13,
+    fontWeight: "500",
+    lineHeight: 18,
+    textDecorationLine: "underline",
+  },
+  stageRoadWrap: {
+    gap: 8,
+    marginTop: 4,
+  },
+  stageRoadNode: {
+    position: "relative",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingBottom: 8,
+  },
+  stageDot: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stageDotDone: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
+  stageDotCurrent: {
+    borderWidth: 2,
+    borderColor: "#8B5CF6",
+    backgroundColor: "rgba(139, 92, 246, 0.2)",
+  },
+  stageDotLocked: {
+    opacity: 0.45,
+  },
+  stageDotText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  stageRoadTextWrap: {
+    flex: 1,
+    gap: 2,
+    paddingRight: 4,
+  },
+  stageRoadLine: {
+    position: "absolute",
+    left: 17,
+    top: 38,
+    width: 2,
+    height: 12,
+    backgroundColor: colors.border,
+  },
+  achievementGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 6,
+  },
+  achievementIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  achievementIconButtonActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  achievementIconEmoji: {
+    fontSize: 22,
+    lineHeight: 26,
+  },
+  achievementDetailBox: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: theme.radius.sm,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    gap: 4,
   },
   builderWrap: {
     gap: 8,
@@ -5300,6 +10011,40 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: theme.radius.sm,
     padding: 8,
+  },
+  hintModalRoot: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: theme.spacing.lg,
+  },
+  hintModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(4, 12, 24, 0.65)",
+  },
+  hintModalBubble: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#2A4C6D",
+    backgroundColor: "#13314D",
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
+    gap: 6,
+  },
+  hintModalTitle: {
+    color: "#BFD9FF",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  hintModalText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "400",
+    lineHeight: 20,
   },
   statusText: {
     color: colors.textSecondary,
@@ -5396,6 +10141,32 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 12,
     lineHeight: 18,
+  },
+  adminCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  adminCardHeadMain: {
+    flex: 1,
+    gap: 2,
+  },
+  adminExpandButton: {
+    minWidth: 120,
+  },
+  adminGrantRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  adminGrantInput: {
+    flex: 1,
+  },
+  adminGrantButton: {
+    minWidth: 120,
   },
   difficultyChip: {
     flexDirection: "row",

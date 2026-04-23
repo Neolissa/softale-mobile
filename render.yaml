@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: softale-backend
+    runtime: node
+    plan: starter
+    rootDir: softale-mobile/backend
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: JWT_SECRET
+        generateValue: true
+      - key: RUSTORE_WEBHOOK_SECRET
+        generateValue: true
+      - key: YOOKASSA_WEBHOOK_SECRET
+        generateValue: true
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: softale-backend-data
+      mountPath: /var/data
+      sizeGB: 1
