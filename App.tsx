@@ -4483,15 +4483,33 @@ const storyConfigs: StoryConfig[] = [
 const adultOnlyStories: QuestStory[] = ["narcissist", "stop-crane-train-18plus"];
 
 function buildForestQuestByDifficulty(questions: QuestDifficulty, story: QuestStory): ForestStep[] {
-  return buildLitRpgCampaign(story, questions).map((template) => ({
-    ...template,
-  }));
+  try {
+    return buildLitRpgCampaign(story, questions).map((template) => ({
+      ...template,
+    }));
+  } catch (error) {
+    console.error("[map-safe-guard] failed to build story quest steps", {
+      story,
+      questions,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
 }
 
 function buildCourseQuestByDifficulty(questions: QuestDifficulty, courseId: CourseId): ForestStep[] {
-  return buildLitRpgCampaign(courseId, questions).map((template) => ({
-    ...template,
-  }));
+  try {
+    return buildLitRpgCampaign(courseId, questions).map((template) => ({
+      ...template,
+    }));
+  } catch (error) {
+    console.error("[map-safe-guard] failed to build course quest steps", {
+      courseId,
+      questions,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
 }
 
 function applyBuilderComplexityProgression(steps: ForestStep[]): ForestStep[] {
@@ -8009,12 +8027,13 @@ export default function App() {
     setMapCatalogTab("all");
     setActiveCatalogTag((prev) => (prev === tag ? null : tag));
   };
-  const getCourseTags = (course: CourseConfig) => [
-    "Переговоры",
-    ...course.recommendedFor
-      .map((styleId) => conflictStyles.find((style) => style.id === styleId)?.label ?? styleId)
-      .slice(0, 2),
-  ];
+  const getCourseTags = (course: CourseConfig) => {
+    const recommendedFor = Array.isArray(course.recommendedFor) ? course.recommendedFor : [];
+    return [
+      "Переговоры",
+      ...recommendedFor.map((styleId) => conflictStyles.find((style) => style.id === styleId)?.label ?? styleId).slice(0, 2),
+    ];
+  };
   const getStoryTags = (story: StoryConfig) => {
     const genreTag: Record<QuestStory, string> = {
       forest: "Приключение",
