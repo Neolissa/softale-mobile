@@ -20,6 +20,39 @@ const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const DB_BACKUP_KEEP = Number(process.env.DB_BACKUP_KEEP || 30);
 const nowIso = () => new Date().toISOString();
 
+function listBackupFiles() {
+  if (!fs.existsSync(BACKUP_DIR)) {
+    return [];
+  }
+  return fs
+    .readdirSync(BACKUP_DIR)
+    .filter((name) => name.startsWith("db-") && name.endsWith(".json"))
+    .sort();
+}
+
+function getLatestBackupPath() {
+  const files = listBackupFiles();
+  if (!files.length) {
+    return null;
+  }
+  return path.join(BACKUP_DIR, files[files.length - 1]);
+}
+
+function restoreDbFromLatestBackup(reason = "unknown") {
+  const latestBackup = getLatestBackupPath();
+  if (!latestBackup) {
+    return false;
+  }
+  try {
+    fs.copyFileSync(latestBackup, DB_PATH);
+    console.warn(`[softale-backend] db restored from backup (${reason}): ${latestBackup}`);
+    return true;
+  } catch (error) {
+    console.error("[softale-backend] failed to restore db from backup", error);
+    return false;
+  }
+}
+
 function ensureDb() {
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) {
@@ -32,6 +65,10 @@ function ensureDb() {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
   if (!fs.existsSync(DB_PATH)) {
+    const restored = restoreDbFromLatestBackup("db_missing");
+    if (restored) {
+      return;
+    }
     const seed = {
       users: {},
       walletTransactions: [],
@@ -58,10 +95,7 @@ function backupDbSnapshot(reason = "startup") {
   const backupFile = path.join(BACKUP_DIR, `db-${stamp}-${safeReason}.json`);
   fs.copyFileSync(DB_PATH, backupFile);
 
-  const files = fs
-    .readdirSync(BACKUP_DIR)
-    .filter((name) => name.startsWith("db-") && name.endsWith(".json"))
-    .sort();
+  const files = listBackupFiles();
   const keep = Number.isFinite(DB_BACKUP_KEEP) ? Math.max(5, DB_BACKUP_KEEP) : 30;
   if (files.length > keep) {
     const toDelete = files.slice(0, files.length - keep);
@@ -78,7 +112,17 @@ function backupDbSnapshot(reason = "startup") {
 
 function readDb() {
   ensureDb();
-  const db = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+  let db;
+  try {
+    db = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+  } catch (error) {
+    console.error("[softale-backend] failed to parse db.json, trying restore from backup", error);
+    const restored = restoreDbFromLatestBackup("db_parse_error");
+    if (!restored) {
+      throw error;
+    }
+    db = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+  }
   db.users ??= {};
   db.walletTransactions ??= [];
   db.paymentOrders ??= {};
