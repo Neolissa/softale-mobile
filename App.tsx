@@ -194,6 +194,7 @@ type QuestStory =
   | "ravenclaw_common_room"
   | "hufflepuff_common_room";
 type ProfileGender = "female" | "male";
+type CharacterGender = "female" | "male" | "neutral";
 type DifficultyConfig = {
   questions: QuestDifficulty;
   label: string;
@@ -4626,34 +4627,73 @@ function sanitizeProfileGender(value: unknown): ProfileGender {
   return value === "male" ? "male" : "female";
 }
 
-function applyGenderToPlayerReplica(text: string, gender: ProfileGender) {
-  if (gender === "female") {
-    return text;
+const defaultCharacterGenderByCampaign: Record<CampaignId, CharacterGender> = {
+  forest: "male",
+  romance: "neutral",
+  slytherin: "neutral",
+  boss: "female",
+  narcissist: "male",
+  gryffindor_common_room: "neutral",
+  ravenclaw_common_room: "neutral",
+  hufflepuff_common_room: "neutral",
+  "office-icebreaker": "female",
+  "boundary-keeper": "neutral",
+  "serpentine-diplomat": "neutral",
+  "heart-lines": "neutral",
+  "mirror-of-truth": "neutral",
+};
+
+function applyGenderMorphology(text: string, gender: CharacterGender) {
+  const normalizedGender: CharacterGender = gender === "neutral" ? "male" : gender;
+
+  const femaleSpecific = text
+    .replace(/Партнер\(ша\)/g, "Партнерша")
+    .replace(/партнер\(ша\)/g, "партнерша")
+    .replace(/согласен\(на\)/g, "согласна")
+    .replace(/Согласен\(на\)/g, "Согласна")
+    .replace(/([А-Яа-яЁё-]+)\(а\)/g, "$1а")
+    .replace(/([А-Яа-яЁё-]+)\(ла\)/g, "$1ла")
+    .replace(/([А-Яа-яЁё-]+)\(лась\)/g, "$1лась")
+    .replace(/([А-Яа-яЁё-]+)\(ша\)/g, "$1ша");
+
+  if (normalizedGender === "female") {
+    return femaleSpecific;
   }
+
   return text
-    .replace(/\bЯ сделала\b/g, "Я сделал")
-    .replace(/\bя сделала\b/g, "я сделал")
-    .replace(/\bЯ сказала\b/g, "Я сказал")
-    .replace(/\bя сказала\b/g, "я сказал")
-    .replace(/\bЯ собрала\b/g, "Я собрал")
-    .replace(/\bя собрала\b/g, "я собрал")
-    .replace(/\bЯ решила\b/g, "Я решил")
-    .replace(/\bя решила\b/g, "я решил")
-    .replace(/\bЯ выбрала\b/g, "Я выбрал")
-    .replace(/\bя выбрала\b/g, "я выбрал")
-    .replace(/\bЯ поняла\b/g, "Я понял")
-    .replace(/\bя поняла\b/g, "я понял")
-    .replace(/\bЯ смогла\b/g, "Я смог")
-    .replace(/\bя смогла\b/g, "я смог")
-    .replace(/\bЯ начала\b/g, "Я начал")
-    .replace(/\bя начала\b/g, "я начал")
-    .replace(/\bЯ закрыла\b/g, "Я закрыл")
-    .replace(/\bя закрыла\b/g, "я закрыл")
-    .replace(/\bЯ прошла\b/g, "Я прошел")
-    .replace(/\bя прошла\b/g, "я прошел")
-    .replace(/\bготова\b/g, "готов")
-    .replace(/\bдолжна\b/g, "должен")
-    .replace(/\bсмогла\b/g, "смог");
+    .replace(/Партнер\(ша\)/g, "Партнер")
+    .replace(/партнер\(ша\)/g, "партнер")
+    .replace(/согласен\(на\)/g, "согласен")
+    .replace(/Согласен\(на\)/g, "Согласен")
+    .replace(/([А-Яа-яЁё-]+)\(а\)/g, "$1")
+    .replace(/([А-Яа-яЁё-]+)\(ла\)/g, "$1")
+    .replace(/([А-Яа-яЁё-]+)\(лась\)/g, "$1ся")
+    .replace(/([А-Яа-яЁё-]+)\(ша\)/g, "$1")
+    .replace(/\bЯ расстроена\b/g, "Я расстроен")
+    .replace(/\bя расстроена\b/g, "я расстроен")
+    .replace(/\bЯ погорячилась\b/g, "Я погорячился")
+    .replace(/\bя погорячилась\b/g, "я погорячился")
+    .replace(/\bЯ виновата\b/g, "Я виноват")
+    .replace(/\bя виновата\b/g, "я виноват");
+}
+
+function inferCharacterGenderBySpeaker(rawSpeaker: string | undefined, campaign: CampaignId): CharacterGender {
+  const normalized = String(rawSpeaker ?? "").toLowerCase();
+  if (/настя|руководительница|партнерша|знакомая/.test(normalized)) {
+    return "female";
+  }
+  if (/\bон\b|артем|знакомый|проводник/.test(normalized)) {
+    return "male";
+  }
+  return defaultCharacterGenderByCampaign[campaign];
+}
+
+function applyGenderToPlayerReplica(text: string, gender: ProfileGender) {
+  return applyGenderMorphology(text, gender);
+}
+
+function applyGenderToNpcReplica(text: string, gender: CharacterGender) {
+  return applyGenderMorphology(text, gender);
 }
 
 function sanitizeSecondaryConflictStyles(value: unknown, primary: ConflictStyleId): ConflictStyleId[] {
@@ -5059,6 +5099,21 @@ export default function App() {
     activeForestStep?.sceneByBranch
       ? activeForestStep.sceneByBranch[dominantBranch]
       : activeForestStep?.scene;
+  const activeNpcGender: CharacterGender = inferCharacterGenderBySpeaker(
+    activeForestStep?.opponentName ?? opponentNameByCampaign[activeCampaignId],
+    activeCampaignId
+  );
+  const visibleStepSceneByNpcGender = applyGenderToNpcReplica(visibleStepScene ?? "", activeNpcGender);
+  const visibleStepDispositionByNpcGender = applyGenderToNpcReplica(
+    activeForestStep?.dispositionText ?? visibleStepScene ?? activeForestStep?.scene ?? "",
+    activeNpcGender
+  );
+  const visibleStepSpeechByNpcGender = applyGenderToNpcReplica(
+    activeForestStep?.opponentSpeech ?? visibleStepScene ?? activeForestStep?.scene ?? "",
+    activeNpcGender
+  );
+  const visibleStepInstructionByPlayerGender = applyGenderToPlayerReplica(activeForestStep?.instruction ?? "", profileGender);
+  const visibleStepHintByPlayerGender = applyGenderToPlayerReplica(activeForestStep?.hint ?? "", profileGender);
   const visibleStepOptions = useMemo(() => {
     const sourceOptions = activeForestStep?.options ?? [];
     if (!sourceOptions.length) {
@@ -5072,6 +5127,14 @@ export default function App() {
   const builderTokens = useMemo(
     () => selectedBuilderIndices.map((idx) => shuffledTokenBank[idx]).filter((token): token is string => Boolean(token)),
     [selectedBuilderIndices, shuffledTokenBank]
+  );
+  const visibleBuilderTokens = useMemo(
+    () => builderTokens.map((token) => applyGenderToPlayerReplica(token, profileGender)),
+    [builderTokens, profileGender]
+  );
+  const visibleShuffledTokenBank = useMemo(
+    () => shuffledTokenBank.map((token) => applyGenderToPlayerReplica(token, profileGender)),
+    [profileGender, shuffledTokenBank]
   );
   const sfxSource = useMemo(
     () => ({
@@ -8715,10 +8778,10 @@ export default function App() {
                   </Animated.View>
                 )}
                 <Text style={styles.sectionLabel}>Сцена</Text>
-                <Text style={styles.questInstructionText}>{activeForestStep.dispositionText ?? visibleStepScene ?? activeForestStep.scene}</Text>
+                <Text style={styles.questInstructionText}>{visibleStepDispositionByNpcGender || visibleStepSceneByNpcGender}</Text>
                 <SpeechBubble
-                  text={activeForestStep.opponentSpeech ?? visibleStepScene ?? activeForestStep.scene}
-                  speakerName={activeForestStep.opponentName}
+                  text={visibleStepSpeechByNpcGender || visibleStepSceneByNpcGender}
+                  speakerName={applyGenderToNpcReplica(activeForestStep.opponentName ?? "", activeNpcGender)}
                   speakerEmoji={activeForestStep.opponentAvatar ?? activeForestStep.sceneEmoji}
                 />
                 <View style={styles.stepHintActionsRow}>
@@ -8726,7 +8789,7 @@ export default function App() {
                     style={styles.hintIconCircle}
                     onPress={() => {
                       playSfx("tap").catch(() => undefined);
-                      openQuestHintBubble(activeForestStep.instruction, "instruction");
+                      openQuestHintBubble(visibleStepInstructionByPlayerGender, "instruction");
                     }}
                     accessibilityRole="button"
                     accessibilityLabel="Показать, что сделать сейчас"
@@ -8736,7 +8799,7 @@ export default function App() {
                   <Pressable
                     onPress={() => {
                       playSfx("swipe").catch(() => undefined);
-                      openQuestHintBubble(`Подсказка: ${activeForestStep.hint}`, "hint");
+                      openQuestHintBubble(`Подсказка: ${visibleStepHintByPlayerGender}`, "hint");
                     }}
                     accessibilityRole="button"
                     accessibilityLabel="Показать подсказку"
@@ -8785,7 +8848,7 @@ export default function App() {
                     <View style={styles.builderLine}>
                       {builderTokens.length ? (
                         <View style={styles.rowWrap}>
-                          {builderTokens.map((token, idx) => (
+                          {visibleBuilderTokens.map((token, idx) => (
                             <Pressable
                               key={`${token}-built-${idx}`}
                               style={[
@@ -8808,7 +8871,7 @@ export default function App() {
                       )}
                     </View>
                     <View style={styles.rowWrap}>
-                      {shuffledTokenBank.map((token, idx) => {
+                      {visibleShuffledTokenBank.map((token, idx) => {
                         const isUsed = selectedBuilderIndices.includes(idx);
                         if (isUsed) {
                           return null;
