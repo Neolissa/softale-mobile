@@ -419,6 +419,14 @@ function buildDefaultQuestRatingStats(): QuestRatingStats {
     slytherin: { sum: 0, count: 0 },
     boss: { sum: 0, count: 0 },
     narcissist: { sum: 0, count: 0 },
+    "sherlock-gaslighter": { sum: 0, count: 0 },
+    "cinderella-advocate": { sum: 0, count: 0 },
+    "healer-empathy": { sum: 0, count: 0 },
+    "partisan-hq": { sum: 0, count: 0 },
+    "stop-crane-train-18plus": { sum: 0, count: 0 },
+    "first-word-forest": { sum: 0, count: 0 },
+    "dragon-ultimatum": { sum: 0, count: 0 },
+    "castle-boundaries": { sum: 0, count: 0 },
     gryffindor_common_room: { sum: 0, count: 0 },
     ravenclaw_common_room: { sum: 0, count: 0 },
     hufflepuff_common_room: { sum: 0, count: 0 },
@@ -5204,6 +5212,40 @@ function sanitizeQuestRatingStats(value: unknown): QuestRatingStats {
       sum: typeof source.narcissist?.sum === "number" ? Math.max(0, source.narcissist.sum) : 0,
       count: typeof source.narcissist?.count === "number" ? Math.max(0, source.narcissist.count) : 0,
     },
+    "sherlock-gaslighter": {
+      sum: typeof source["sherlock-gaslighter"]?.sum === "number" ? Math.max(0, source["sherlock-gaslighter"].sum) : 0,
+      count: typeof source["sherlock-gaslighter"]?.count === "number" ? Math.max(0, source["sherlock-gaslighter"].count) : 0,
+    },
+    "cinderella-advocate": {
+      sum: typeof source["cinderella-advocate"]?.sum === "number" ? Math.max(0, source["cinderella-advocate"].sum) : 0,
+      count: typeof source["cinderella-advocate"]?.count === "number" ? Math.max(0, source["cinderella-advocate"].count) : 0,
+    },
+    "healer-empathy": {
+      sum: typeof source["healer-empathy"]?.sum === "number" ? Math.max(0, source["healer-empathy"].sum) : 0,
+      count: typeof source["healer-empathy"]?.count === "number" ? Math.max(0, source["healer-empathy"].count) : 0,
+    },
+    "partisan-hq": {
+      sum: typeof source["partisan-hq"]?.sum === "number" ? Math.max(0, source["partisan-hq"].sum) : 0,
+      count: typeof source["partisan-hq"]?.count === "number" ? Math.max(0, source["partisan-hq"].count) : 0,
+    },
+    "stop-crane-train-18plus": {
+      sum:
+        typeof source["stop-crane-train-18plus"]?.sum === "number" ? Math.max(0, source["stop-crane-train-18plus"].sum) : 0,
+      count:
+        typeof source["stop-crane-train-18plus"]?.count === "number" ? Math.max(0, source["stop-crane-train-18plus"].count) : 0,
+    },
+    "first-word-forest": {
+      sum: typeof source["first-word-forest"]?.sum === "number" ? Math.max(0, source["first-word-forest"].sum) : 0,
+      count: typeof source["first-word-forest"]?.count === "number" ? Math.max(0, source["first-word-forest"].count) : 0,
+    },
+    "dragon-ultimatum": {
+      sum: typeof source["dragon-ultimatum"]?.sum === "number" ? Math.max(0, source["dragon-ultimatum"].sum) : 0,
+      count: typeof source["dragon-ultimatum"]?.count === "number" ? Math.max(0, source["dragon-ultimatum"].count) : 0,
+    },
+    "castle-boundaries": {
+      sum: typeof source["castle-boundaries"]?.sum === "number" ? Math.max(0, source["castle-boundaries"].sum) : 0,
+      count: typeof source["castle-boundaries"]?.count === "number" ? Math.max(0, source["castle-boundaries"].count) : 0,
+    },
     gryffindor_common_room: {
       sum: typeof source.gryffindor_common_room?.sum === "number" ? Math.max(0, source.gryffindor_common_room.sum) : 0,
       count: typeof source.gryffindor_common_room?.count === "number" ? Math.max(0, source.gryffindor_common_room.count) : 0,
@@ -7888,7 +7930,7 @@ export default function App() {
   const visibleTabs = tabs.filter((tab) => (tab.key === "admin" ? currentUserRole === "ADMIN" : true));
   const currentStageCost = Math.min(28, 12 + Math.max(0, completedCount - 1) * 2);
   const storyRatingLabel = (storyId: QuestStory) => {
-    const stats = questRatingStats[storyId];
+    const stats = questRatingStats[storyId] ?? { sum: 0, count: 0 };
     if (!stats.count) {
       return "Новая история";
     }
