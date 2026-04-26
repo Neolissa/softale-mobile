@@ -278,6 +278,16 @@ type UserProfile = {
   lastEnergyTransferAt: string | null;
   lastSeenAt: string | null;
 };
+type RuntimeQuestProgressSnapshot = {
+  activeProgramMode: ProgramMode;
+  selectedStory: QuestStory;
+  selectedCourseId: CourseId;
+  selectedDifficulty: QuestDifficulty;
+  forestStepIndex: number;
+  forestStarted: boolean;
+  forestFinished: boolean;
+  updatedAt: string;
+};
 type UserRole = "USER" | "ADMIN";
 type AuthUser = {
   email: string;
@@ -325,6 +335,7 @@ type CourseConfig = {
 };
 
 const AUTH_STORAGE_KEY = "softale_auth_v1";
+const RUNTIME_QUEST_PROGRESS_KEY = "softale_runtime_quest_progress_v1";
 const ANALYTICS_EVENTS_LIMIT = 400;
 const ADMIN_EMAIL = "neolissa@gmail.com";
 const ADMIN_PASSWORD = "neolissaAdmin1001001";
@@ -5618,6 +5629,7 @@ export default function App() {
   const activeTabRef = useRef<Tab>("map");
   const reactivationCheckDoneForRef = useRef<string | null>(null);
   const skipNextServerProfileSyncRef = useRef(false);
+  const runtimeProgressHydratedForRef = useRef<string | null>(null);
   const authBackendMode = authApi.getMode();
   const isServerAuth = authBackendMode === "server";
 
@@ -5642,6 +5654,15 @@ export default function App() {
     [activeProgramMode, selectedDifficulty, activeCourse.id, selectedStory]
   );
   const normalizedQuestSteps = useMemo(() => applyBuilderComplexityProgression(currentForestQuestSteps), [currentForestQuestSteps]);
+  useEffect(() => {
+    if (!forestStarted || forestFinished) {
+      return;
+    }
+    const maxIdx = Math.max(0, normalizedQuestSteps.length - 1);
+    if (forestStepIndex > maxIdx) {
+      setForestStepIndex(maxIdx);
+    }
+  }, [forestFinished, forestStarted, forestStepIndex, normalizedQuestSteps.length]);
   const questForecast = useMemo(
     () => calculateQuestForecast(normalizedQuestSteps, activeDifficultyConfig, 0.8),
     [activeDifficultyConfig, normalizedQuestSteps]
@@ -6084,6 +6105,86 @@ export default function App() {
   useEffect(() => {
     closeQuestHintBubble();
   }, [forestStepIndex, forestStarted]);
+
+  useEffect(() => {
+    const persistRuntimeQuestProgress = async () => {
+      if (!currentUserEmail || !isProfileHydrated) {
+        return;
+      }
+      const snapshot: RuntimeQuestProgressSnapshot = {
+        activeProgramMode,
+        selectedStory,
+        selectedCourseId,
+        selectedDifficulty,
+        forestStepIndex: Math.max(0, forestStepIndex),
+        forestStarted,
+        forestFinished,
+        updatedAt: new Date().toISOString(),
+      };
+      try {
+        await AsyncStorage.setItem(`${RUNTIME_QUEST_PROGRESS_KEY}:${currentUserEmail}`, JSON.stringify(snapshot));
+      } catch {
+        // Runtime snapshot is best-effort and must not break core flow.
+      }
+    };
+    persistRuntimeQuestProgress();
+  }, [
+    activeProgramMode,
+    currentUserEmail,
+    forestFinished,
+    forestStarted,
+    forestStepIndex,
+    isProfileHydrated,
+    selectedCourseId,
+    selectedDifficulty,
+    selectedStory,
+  ]);
+
+  useEffect(() => {
+    const hydrateRuntimeQuestProgress = async () => {
+      if (!currentUserEmail || !isProfileHydrated) {
+        return;
+      }
+      if (runtimeProgressHydratedForRef.current === currentUserEmail) {
+        return;
+      }
+      runtimeProgressHydratedForRef.current = currentUserEmail;
+      try {
+        const raw = await AsyncStorage.getItem(`${RUNTIME_QUEST_PROGRESS_KEY}:${currentUserEmail}`);
+        if (!raw) {
+          return;
+        }
+        const snapshot = JSON.parse(raw) as Partial<RuntimeQuestProgressSnapshot>;
+        if (snapshot.activeProgramMode === "story" || snapshot.activeProgramMode === "course") {
+          setActiveProgramMode(snapshot.activeProgramMode);
+        }
+        if (typeof snapshot.selectedStory === "string" && storyConfigs.some((story) => story.id === snapshot.selectedStory)) {
+          setSelectedStory(snapshot.selectedStory);
+        }
+        if (typeof snapshot.selectedCourseId === "string" && courses.some((course) => course.id === snapshot.selectedCourseId)) {
+          setSelectedCourseId(snapshot.selectedCourseId as CourseId);
+        }
+        if (
+          typeof snapshot.selectedDifficulty === "number" &&
+          [5, 10, 15, 25, 125].includes(snapshot.selectedDifficulty)
+        ) {
+          setSelectedDifficulty(snapshot.selectedDifficulty as QuestDifficulty);
+        }
+        if (typeof snapshot.forestStarted === "boolean") {
+          setForestStarted(snapshot.forestStarted);
+        }
+        if (typeof snapshot.forestFinished === "boolean") {
+          setForestFinished(snapshot.forestFinished);
+        }
+        if (typeof snapshot.forestStepIndex === "number" && Number.isFinite(snapshot.forestStepIndex)) {
+          setForestStepIndex(Math.max(0, Math.floor(snapshot.forestStepIndex)));
+        }
+      } catch {
+        // Ignore broken snapshot and continue with profile defaults.
+      }
+    };
+    hydrateRuntimeQuestProgress();
+  }, [currentUserEmail, isProfileHydrated, courses, storyConfigs]);
 
   useEffect(() => {
     return () => {
