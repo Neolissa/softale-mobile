@@ -9,6 +9,8 @@ const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const RUSTORE_WEBHOOK_SECRET = process.env.RUSTORE_WEBHOOK_SECRET || "dev-rustore-secret";
 const YOOKASSA_WEBHOOK_SECRET = process.env.YOOKASSA_WEBHOOK_SECRET || "dev-yookassa-secret";
+const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || "neolissa@gmail.com";
+const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "neolissaAdmin1001001";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
@@ -25,6 +27,7 @@ function ensureDb() {
       walletTransactions: [],
       paymentOrders: {},
       paymentEvents: [],
+      analyticsEvents: [],
       promoCodes: {
         "SOFTALE-START": { energy: 40, expiresAt: "2026-12-31T23:59:59.000Z", maxActivations: 1, activatedBy: [] },
         "RETURN-BOOST": { energy: 80, expiresAt: "2026-09-01T00:00:00.000Z", maxActivations: 1, activatedBy: [] }
@@ -38,7 +41,20 @@ function ensureDb() {
 
 function readDb() {
   ensureDb();
-  return JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+  const db = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+  db.users ??= {};
+  db.walletTransactions ??= [];
+  db.paymentOrders ??= {};
+  db.paymentEvents ??= [];
+  db.promoCodes ??= {};
+  db.idempotency ??= {};
+  db.referrals ??= [];
+  db.analyticsEvents ??= [];
+  const adminUpserted = ensureDefaultAdmin(db);
+  if (adminUpserted) {
+    writeDb(db);
+  }
+  return db;
 }
 
 function writeDb(db) {
@@ -119,6 +135,50 @@ function ensureWallet() {
   };
 }
 
+function ensureDefaultAdmin(db) {
+  const email = normalizeEmail(DEFAULT_ADMIN_EMAIL);
+  if (!email.includes("@")) return false;
+
+  let changed = false;
+  const existing = db.users[email];
+  if (existing) {
+    if (existing.role !== "ADMIN") {
+      existing.role = "ADMIN";
+      changed = true;
+    }
+    const expectedHash = hashPassword(DEFAULT_ADMIN_PASSWORD);
+    if (existing.passwordHash !== expectedHash) {
+      existing.passwordHash = expectedHash;
+      changed = true;
+    }
+    existing.profile ??= ensureUserProfile();
+    existing.wallet ??= ensureWallet();
+    if (!existing.profile.displayName || existing.profile.displayName === "Герой леса") {
+      existing.profile.displayName = "Neolissa";
+      existing.profile.profileSetupDone = true;
+      changed = true;
+    }
+    if (changed) {
+      existing.updatedAt = nowIso();
+    }
+    return changed;
+  }
+
+  const profile = ensureUserProfile();
+  profile.displayName = "Neolissa";
+  profile.profileSetupDone = true;
+  db.users[email] = {
+    email,
+    passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+    role: "ADMIN",
+    profile,
+    wallet: ensureWallet(),
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+  return true;
+}
+
 function getUserByToken(req, res, db) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
@@ -138,6 +198,16 @@ function getUserByToken(req, res, db) {
     res.status(401).json({ error: "Invalid token" });
     return null;
   }
+}
+
+function requireAdmin(req, res, db) {
+  const user = getUserByToken(req, res, db);
+  if (!user) return null;
+  if (user.role !== "ADMIN") {
+    res.status(403).json({ error: "Admin access required" });
+    return null;
+  }
+  return user;
 }
 
 function applyWalletDelta(db, user, deltaEnergy, deltaXp, reason, meta = {}) {
@@ -280,6 +350,163 @@ app.post("/v1/economy/profile/sync", (req, res) => {
   user.updatedAt = nowIso();
   writeDb(db);
   return res.json({ user: safeUser(user) });
+});
+
+app.post("/v1/analytics/event", (req, res) => {
+  const db = readDb();
+  const user = getUserByToken(req, res, db);
+  if (!user) return;
+  const type = String(req.body.type || "").trim();
+  if (!type) {
+    return res.status(400).json({ error: "Event type is required" });
+  }
+  const event = {
+    id: crypto.randomUUID(),
+    at: nowIso(),
+    email: user.email,
+    role: user.role,
+    type,
+    tab: typeof req.body.tab === "string" ? req.body.tab : undefined,
+    storyId: typeof req.body.storyId === "string" ? req.body.storyId : undefined,
+    courseId: typeof req.body.courseId === "string" ? req.body.courseId : undefined,
+    difficulty: Number.isFinite(Number(req.body.difficulty)) ? Number(req.body.difficulty) : undefined,
+    stepIndex: Number.isFinite(Number(req.body.stepIndex)) ? Number(req.body.stepIndex) : undefined,
+    details: typeof req.body.details === "string" ? req.body.details.slice(0, 500) : undefined
+  };
+  db.analyticsEvents.push(event);
+  if (db.analyticsEvents.length > 10000) {
+    db.analyticsEvents = db.analyticsEvents.slice(-10000);
+  }
+  user.updatedAt = nowIso();
+  writeDb(db);
+  return res.status(201).json({ ok: true, id: event.id });
+});
+
+app.get("/v1/admin/metrics", (req, res) => {
+  const db = readDb();
+  const admin = requireAdmin(req, res, db);
+  if (!admin) return;
+
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const from24h = now - dayMs;
+  const from7d = now - 7 * dayMs;
+  const from30d = now - 30 * dayMs;
+
+  const events = Array.isArray(db.analyticsEvents) ? db.analyticsEvents : [];
+  const users = Object.values(db.users || {});
+
+  const events24h = events.filter((event) => Date.parse(event.at) >= from24h);
+  const events7d = events.filter((event) => Date.parse(event.at) >= from7d);
+  const events30d = events.filter((event) => Date.parse(event.at) >= from30d);
+
+  const uniqueByWindow = (items) => Array.from(new Set(items.map((event) => event.email))).length;
+  const byType24h = (type) => events24h.filter((event) => event.type === type).length;
+
+  const questStarts24h = byType24h("quest_start");
+  const questCompletions24h = byType24h("quest_complete");
+  const courseStarts24h = byType24h("course_start");
+  const courseCompletions24h = byType24h("course_complete");
+
+  const dropOff24h = byType24h("drop_off");
+  const stepFail24h = byType24h("step_fail");
+  const penalties24h = byType24h("penalty_applied");
+  const answerIncorrect24h = byType24h("answer_incorrect");
+
+  const tabViews24h = events24h.filter((event) => event.type === "tab_view");
+  const topTabs = Object.entries(
+    tabViews24h.reduce((acc, event) => {
+      const key = event.tab || "unknown";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([tab, views]) => ({ tab, views }));
+
+  const topErrorTypes = Object.entries(
+    events24h.reduce((acc, event) => {
+      if (event.type !== "answer_incorrect" || typeof event.details !== "string") return acc;
+      const match = event.details.match(/type:([^;]+)/);
+      const key = match?.[1]?.trim();
+      if (!key) return acc;
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([errorType, count]) => ({ errorType, count }));
+
+  const registrations24h = users.filter((user) => Date.parse(user.createdAt || "") >= from24h).length;
+
+  const perUser = users
+    .map((user) => {
+      const userEvents24h = events24h.filter((event) => event.email === user.email);
+      return {
+        email: user.email,
+        role: user.role,
+        lastSeenAt: user.updatedAt || user.createdAt || null,
+        wallet: {
+          xp: user.wallet?.xp ?? 0,
+          energy: user.wallet?.energy ?? 0
+        },
+        events24h: userEvents24h.length,
+        sessions24h: userEvents24h.filter((event) => event.type === "session_start").length,
+        dropOff24h: userEvents24h.filter((event) => event.type === "drop_off").length,
+        questStarts24h: userEvents24h.filter((event) => event.type === "quest_start").length,
+        questCompletions24h: userEvents24h.filter((event) => event.type === "quest_complete").length
+      };
+    })
+    .sort((a, b) => Date.parse(b.lastSeenAt || "") - Date.parse(a.lastSeenAt || ""))
+    .slice(0, 200);
+
+  const recentCriticalEvents = events
+    .filter((event) => ["drop_off", "step_fail", "penalty_applied", "answer_incorrect"].includes(event.type))
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+    .slice(0, 40)
+    .map((event) => ({
+      at: event.at,
+      email: event.email,
+      type: event.type,
+      details: event.details || ""
+    }));
+
+  return res.json({
+    generatedAt: nowIso(),
+    totals: {
+      users: users.length,
+      registrations24h,
+      sessions24h: byType24h("session_start"),
+      logins24h: byType24h("auth_login"),
+      activeUsers24h: uniqueByWindow(events24h),
+      dau: uniqueByWindow(events24h),
+      wau: uniqueByWindow(events7d),
+      mau: uniqueByWindow(events30d)
+    },
+    funnel24h: {
+      questStarts: questStarts24h,
+      questCompletions: questCompletions24h,
+      questCompletionRate: questStarts24h ? Math.round((questCompletions24h / questStarts24h) * 100) : 0,
+      courseStarts: courseStarts24h,
+      courseCompletions: courseCompletions24h,
+      courseCompletionRate: courseStarts24h ? Math.round((courseCompletions24h / courseStarts24h) * 100) : 0
+    },
+    quality24h: {
+      dropOffs: dropOff24h,
+      stepFails: stepFail24h,
+      penalties: penalties24h,
+      answerIncorrect: answerIncorrect24h,
+      topErrorTypes
+    },
+    engagement24h: {
+      tabViews: tabViews24h.length,
+      topTabs
+    },
+    recentCriticalEvents,
+    perUser
+  });
 });
 
 app.get("/v1/economy/me", (req, res) => {

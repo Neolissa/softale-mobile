@@ -7,6 +7,7 @@ import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useSta
 import { getCampaignBlockArc, getCampaignNodes, seasonalEventMvp, type QuestNarrativeNode, type SeasonalEventStep } from "./questContent";
 import { economyApi, type EconomySnapshot } from "./economyApi";
 import { authApi } from "./authApi";
+import { analyticsApi, type AdminMetricsResponse } from "./analyticsApi";
 import { achievementEmojiByCampaignTier, editorialEndingByCampaignTier, editorialStepOptionsByCampaign } from "./scenarioBible";
 import {
   ActivityIndicator,
@@ -4966,6 +4967,9 @@ export default function App() {
   const [, setAnalyticsSnapshot] = useState<Record<string, UserAnalytics>>({});
   const [adminUsers, setAdminUsers] = useState<AdminUserView[]>([]);
   const [adminUserSearch, setAdminUserSearch] = useState("");
+  const [serverAdminMetrics, setServerAdminMetrics] = useState<AdminMetricsResponse | null>(null);
+  const [isServerMetricsLoading, setIsServerMetricsLoading] = useState(false);
+  const [serverMetricsError, setServerMetricsError] = useState("");
   const [expandedAdminEmail, setExpandedAdminEmail] = useState<string | null>(null);
   const questHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -5226,6 +5230,38 @@ export default function App() {
   }, [currentUserEmail, isProfileHydrated, lastSeenAt, welcomeEnergyGranted]);
 
   const refreshAnalyticsSnapshot = async () => {
+    if (isServerAuth && currentUserRole === "ADMIN") {
+      setIsServerMetricsLoading(true);
+      setServerMetricsError("");
+      try {
+        const metrics = await analyticsApi.getAdminMetrics();
+        setServerAdminMetrics(metrics);
+        const nextAdminUsers: AdminUserView[] = metrics.perUser.map((user) => {
+          const seedIso = user.lastSeenAt ?? new Date().toISOString();
+          const analytics = buildDefaultAnalytics(seedIso);
+          analytics.lastSeenAt = user.lastSeenAt ?? analytics.lastSeenAt;
+          analytics.totalSessions = user.sessions24h;
+          analytics.counters.questStarts = user.questStarts24h;
+          analytics.counters.questCompletions = user.questCompletions24h;
+          analytics.counters.dropOffs = user.dropOff24h;
+          return {
+            email: user.email,
+            role: (user.role as UserRole) ?? "USER",
+            xp: user.wallet.xp,
+            energy: user.wallet.energy,
+            analytics,
+          };
+        });
+        setAdminUsers(nextAdminUsers);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Не удалось загрузить серверные метрики.";
+        setServerMetricsError(message);
+      } finally {
+        setIsServerMetricsLoading(false);
+      }
+    }
+
     const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) {
       setAnalyticsSnapshot({});
@@ -5288,6 +5324,22 @@ export default function App() {
     const targetEmail = emailOverride ?? currentUserEmail;
     if (!targetEmail) {
       return;
+    }
+
+    if (isServerAuth) {
+      try {
+        await analyticsApi.trackEvent({
+          type,
+          details: payload.details,
+          tab: payload.tab,
+          courseId: payload.courseId,
+          storyId: payload.storyId,
+          difficulty: payload.difficulty,
+          stepIndex: payload.stepIndex,
+        });
+      } catch {
+        // swallow analytics transport errors to avoid breaking core UX
+      }
     }
 
     const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
@@ -9413,6 +9465,53 @@ export default function App() {
               {!!adminActionMessage && <Text style={styles.authSuccess}>{adminActionMessage}</Text>}
               <AppButton label="Обновить аналитику" variant="secondary" onPress={() => refreshAnalyticsSnapshot()} />
             </AppCard>
+
+            {isServerAuth && (
+              <AppCard>
+                <Text style={styles.sectionLabel}>Продуктовый дашборд (server)</Text>
+                {isServerMetricsLoading && <Text style={styles.cardMeta}>Обновляю метрики...</Text>}
+                {!!serverMetricsError && <Text style={styles.authError}>{serverMetricsError}</Text>}
+                {serverAdminMetrics && (
+                  <>
+                    <Text style={styles.cardText}>
+                      DAU/WAU/MAU: {serverAdminMetrics.totals.dau} / {serverAdminMetrics.totals.wau} / {serverAdminMetrics.totals.mau}
+                    </Text>
+                    <Text style={styles.cardMeta}>
+                      Регистрации 24ч: {serverAdminMetrics.totals.registrations24h} • Логины 24ч: {serverAdminMetrics.totals.logins24h}
+                    </Text>
+                    <Text style={styles.cardMeta}>
+                      Сессии 24ч: {serverAdminMetrics.totals.sessions24h} • Активные 24ч: {serverAdminMetrics.totals.activeUsers24h}
+                    </Text>
+                    <Text style={styles.sectionLabel}>Воронка 24ч</Text>
+                    <Text style={styles.cardMeta}>
+                      Квесты: старт {serverAdminMetrics.funnel24h.questStarts} → финиш {serverAdminMetrics.funnel24h.questCompletions} (
+                      {serverAdminMetrics.funnel24h.questCompletionRate}%)
+                    </Text>
+                    <Text style={styles.cardMeta}>
+                      Курсы: старт {serverAdminMetrics.funnel24h.courseStarts} → финиш {serverAdminMetrics.funnel24h.courseCompletions} (
+                      {serverAdminMetrics.funnel24h.courseCompletionRate}%)
+                    </Text>
+                    <Text style={styles.sectionLabel}>Ошибки и отказы 24ч</Text>
+                    <Text style={styles.cardMeta}>
+                      Отказы: {serverAdminMetrics.quality24h.dropOffs} • Step fail: {serverAdminMetrics.quality24h.stepFails} • Штрафы:{" "}
+                      {serverAdminMetrics.quality24h.penalties}
+                    </Text>
+                    <Text style={styles.cardMeta}>Неверных ответов: {serverAdminMetrics.quality24h.answerIncorrect}</Text>
+                    {serverAdminMetrics.quality24h.topErrorTypes.slice(0, 5).map((item) => (
+                      <Text key={`srv-err-${item.errorType}`} style={styles.cardMeta}>
+                        • {formatErrorTypeLabelRu(item.errorType)}: {item.count}
+                      </Text>
+                    ))}
+                    <Text style={styles.sectionLabel}>Просмотры табов 24ч</Text>
+                    {serverAdminMetrics.engagement24h.topTabs.slice(0, 5).map((item) => (
+                      <Text key={`srv-tab-${item.tab}`} style={styles.cardMeta}>
+                        • {item.tab}: {item.views}
+                      </Text>
+                    ))}
+                  </>
+                )}
+              </AppCard>
+            )}
 
             {filteredAdminUsers.map((user) => {
               const email = user.email;
