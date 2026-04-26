@@ -34,6 +34,11 @@ jobs:
       - name: Export Expo web build
         run: npm run web:build
 
+      - name: Rewrite asset paths for GitHub Pages subpath
+        run: |
+          sed -i 's|href="/|href="./|g' dist/index.html
+          sed -i 's|src="/|src="./|g' dist/index.html
+
       - name: Add SPA fallback page
         run: cp dist/index.html dist/404.html
 
