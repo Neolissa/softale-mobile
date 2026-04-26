@@ -6686,8 +6686,21 @@ export default function App() {
     if (result.canceled || !result.assets.length) {
       return;
     }
-    setAvatarUri(result.assets[0].uri);
+    const localAvatarUri = result.assets[0].uri;
+    setAvatarUri(localAvatarUri);
     setProfileSetupDone(true);
+    if (isServerAuth && currentUserEmail) {
+      try {
+        const token = await AsyncStorage.getItem(authApi.storageKey);
+        if (token) {
+          const uploaded = await authApi.uploadAvatar(token, localAvatarUri);
+          setAvatarUri(uploaded.avatarUri);
+          setPromoInfo("Аватар сохранен в профиле.");
+        }
+      } catch {
+        setPromoInfo("Не удалось загрузить аватар на сервер. Оставила локальную версию.");
+      }
+    }
   };
 
   const saveProfileIdentity = () => {
@@ -6750,9 +6763,14 @@ export default function App() {
             return;
           }
           response = await authApi.register(email, authPassword, authNickname);
+          let persistentAvatarUri = authAvatarUri;
+          if (authAvatarUri) {
+            const uploaded = await authApi.uploadAvatar(response.token, authAvatarUri);
+            persistentAvatarUri = uploaded.avatarUri;
+          }
           await authApi.syncProfile(response.token, {
             displayName: sanitizeShortText(authNickname, "Игрок", 60),
-            avatarUri: authAvatarUri,
+            avatarUri: persistentAvatarUri,
             gender: authGender,
             isAdult18Plus: authIsAdult18Plus,
             profileSetupDone: true,
@@ -6962,9 +6980,14 @@ export default function App() {
     if (isServerAuth) {
       try {
         const response = await authApi.register(email, authPassword, authNickname);
+        let persistentAvatarUri = authAvatarUri;
+        if (authAvatarUri) {
+          const uploaded = await authApi.uploadAvatar(response.token, authAvatarUri);
+          persistentAvatarUri = uploaded.avatarUri;
+        }
         await authApi.syncProfile(response.token, {
           displayName: sanitizeShortText(authNickname, "Игрок", 60),
-          avatarUri: authAvatarUri,
+          avatarUri: persistentAvatarUri,
           gender: authGender,
           isAdult18Plus: authIsAdult18Plus,
           profileSetupDone: true,

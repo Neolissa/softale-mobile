@@ -46,6 +46,7 @@
 Сервер находится в `backend/server.js` и поднимает:
 - auth (`/v1/auth/register`, `/v1/auth/login`, `/v1/auth/me`)
 - economy (`/v1/economy/*`)
+- profile upload (`POST /v1/profile/avatar`, хранение в `DATA_DIR/uploads`)
 - payments (`/v1/economy/payments/create`, webhooks RuStore/YooKassa)
 
 ### Команды
@@ -63,6 +64,7 @@
 - `JWT_SECRET`
 - `RUSTORE_WEBHOOK_SECRET`
 - `YOOKASSA_WEBHOOK_SECRET`
+- `DATA_DIR` (default `backend/data`, в production рекомендуем persistent path вроде `/var/data`)
 
 ### Важно по идемпотентности
 

@@ -98,4 +98,49 @@ export const authApi = {
       body: { profile },
     });
   },
+  async uploadAvatar(token: string, avatarUri: string) {
+    const baseUrl = getApiBaseUrl();
+    const formData = new FormData();
+    const fileName = `avatar-${Date.now()}.jpg`;
+
+    if (avatarUri.startsWith("blob:") || avatarUri.startsWith("data:") || avatarUri.startsWith("http")) {
+      const blob = await fetch(avatarUri).then((response) => response.blob());
+      formData.append("avatar", blob, fileName);
+    } else {
+      formData.append(
+        "avatar",
+        {
+          uri: avatarUri,
+          name: fileName,
+          type: "image/jpeg",
+        } as unknown as Blob
+      );
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/v1/profile/avatar`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+    } catch {
+      throw new Error(`Нет соединения с сервером (${baseUrl}). Не удалось загрузить аватар.`);
+    }
+
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`;
+      try {
+        const payload = (await response.json()) as { error?: string };
+        if (payload.error) message = payload.error;
+      } catch {
+        // ignore parse errors
+      }
+      throw new Error(message);
+    }
+
+    return (await response.json()) as { avatarUri: string };
+  },
 };

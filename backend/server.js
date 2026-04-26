@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
+const multer = require("multer");
 
 const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
@@ -14,12 +15,21 @@ const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "neolissaAd
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
+const BACKUP_DIR = path.join(DATA_DIR, "backups");
+const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
+const DB_BACKUP_KEEP = Number(process.env.DB_BACKUP_KEEP || 30);
 const nowIso = () => new Date().toISOString();
 
 function ensureDb() {
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+  if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
   if (!fs.existsSync(DB_PATH)) {
     const seed = {
@@ -36,6 +46,33 @@ function ensureDb() {
       referrals: []
     };
     fs.writeFileSync(DB_PATH, JSON.stringify(seed, null, 2), "utf-8");
+  }
+}
+
+function backupDbSnapshot(reason = "startup") {
+  ensureDb();
+  if (!fs.existsSync(DB_PATH)) return;
+
+  const safeReason = String(reason).replace(/[^a-z0-9_-]/gi, "_").slice(0, 24) || "manual";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupFile = path.join(BACKUP_DIR, `db-${stamp}-${safeReason}.json`);
+  fs.copyFileSync(DB_PATH, backupFile);
+
+  const files = fs
+    .readdirSync(BACKUP_DIR)
+    .filter((name) => name.startsWith("db-") && name.endsWith(".json"))
+    .sort();
+  const keep = Number.isFinite(DB_BACKUP_KEEP) ? Math.max(5, DB_BACKUP_KEEP) : 30;
+  if (files.length > keep) {
+    const toDelete = files.slice(0, files.length - keep);
+    toDelete.forEach((name) => {
+      const filePath = path.join(BACKUP_DIR, name);
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        // ignore cleanup errors to avoid blocking runtime
+      }
+    });
   }
 }
 
@@ -245,8 +282,15 @@ function storeIdempotent(db, token, responseData) {
 }
 
 const app = express();
+app.set("trust proxy", true);
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(UPLOADS_DIR, { maxAge: "7d" }));
+
+const uploadAvatar = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, at: nowIso() });
@@ -350,6 +394,54 @@ app.post("/v1/economy/profile/sync", (req, res) => {
   user.updatedAt = nowIso();
   writeDb(db);
   return res.json({ user: safeUser(user) });
+});
+
+app.post("/v1/profile/avatar", uploadAvatar.single("avatar"), (req, res) => {
+  const db = readDb();
+  const user = getUserByToken(req, res, db);
+  if (!user) return;
+  if (!req.file) {
+    return res.status(400).json({ error: "Avatar file is required" });
+  }
+  if (!req.file.mimetype.startsWith("image/")) {
+    return res.status(400).json({ error: "Only image uploads are allowed" });
+  }
+
+  const extensionByMime = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+  };
+  const ext = extensionByMime[req.file.mimetype] || ".jpg";
+  const safeEmail = user.email.replace(/[^a-z0-9._-]/gi, "_");
+  const fileName = `avatar-${safeEmail}-${Date.now()}${ext}`;
+  const targetPath = path.join(UPLOADS_DIR, fileName);
+  fs.writeFileSync(targetPath, req.file.buffer);
+
+  // Clean previous local avatar file if possible.
+  const previousAvatar = typeof user.profile?.avatarUri === "string" ? user.profile.avatarUri : "";
+  if (previousAvatar.includes("/uploads/")) {
+    const previousName = previousAvatar.split("/uploads/")[1];
+    if (previousName) {
+      const previousPath = path.join(UPLOADS_DIR, path.basename(previousName));
+      if (previousPath !== targetPath && fs.existsSync(previousPath)) {
+        try {
+          fs.unlinkSync(previousPath);
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+    }
+  }
+
+  const host = req.get("host");
+  const protocol = req.protocol || "https";
+  const avatarUri = `${protocol}://${host}/uploads/${fileName}`;
+  user.profile.avatarUri = avatarUri;
+  user.updatedAt = nowIso();
+  writeDb(db);
+  return res.status(201).json({ avatarUri });
 });
 
 app.post("/v1/analytics/event", (req, res) => {
@@ -727,6 +819,7 @@ app.post("/v1/economy/payments/webhook/yookassa", (req, res) => {
 
 app.listen(PORT, () => {
   ensureDb();
+  backupDbSnapshot("startup");
   // eslint-disable-next-line no-console
-  console.log(`[softale-backend] listening on ${PORT}`);
+  console.log(`[softale-backend] listening on ${PORT}, backups in ${BACKUP_DIR}`);
 });
