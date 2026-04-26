@@ -5151,7 +5151,7 @@ function applyGenderMorphology(text: string, gender: CharacterGender) {
     return femaleSpecific;
   }
 
-  return applyExplicitBracketVariants(text, "male")
+  let maleText = applyExplicitBracketVariants(text, "male")
     .replace(/Партнер\(ша\)/g, "Партнер")
     .replace(/партнер\(ша\)/g, "партнер")
     .replace(/согласен\(на\)/g, "согласен")
@@ -5166,6 +5166,26 @@ function applyGenderMorphology(text: string, gender: CharacterGender) {
     .replace(/\bя погорячилась\b/g, "я погорячился")
     .replace(/\bЯ виновата\b/g, "Я виноват")
     .replace(/\bя виновата\b/g, "я виноват");
+
+  // Safety net for legacy lines that were authored without bracket markup.
+  // Apply only high-signal first-person/professional forms to avoid semantic damage.
+  const maleWordReplacements: Array<[RegExp, string]> = [
+    [/\bдолжна\b/gi, "должен"],
+    [/\bобязана\b/gi, "обязан"],
+    [/\bготова\b/gi, "готов"],
+    [/\bсогласна\b/gi, "согласен"],
+    [/\bвиновата\b/gi, "виноват"],
+    [/\bправа\b/gi, "прав"],
+    [/\bустала\b/gi, "устал"],
+    [/\bсмогла\b/gi, "смог"],
+    [/\bдолжнась\b/gi, "должен"],
+    [/\bлекарка\b/gi, "лекарь"],
+  ];
+  maleWordReplacements.forEach(([pattern, replacement]) => {
+    maleText = maleText.replace(pattern, replacement);
+  });
+
+  return maleText;
 }
 
 function resolvePlayerGenderForCampaign(profileGender: ProfileGender, campaign: CampaignId): ProfileGender {
@@ -5460,6 +5480,7 @@ export default function App() {
   const [pairEventMessage, setPairEventMessage] = useState("");
   const [pairInviteLoading, setPairInviteLoading] = useState(false);
   const [pairSubmitLoading, setPairSubmitLoading] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [activePairId, setActivePairId] = useState<string | null>(null);
   const [activePairPassType, setActivePairPassType] = useState<EmpathyPassType | null>(null);
   const [activePairAnswers, setActivePairAnswers] = useState<number[]>(
@@ -8422,13 +8443,34 @@ export default function App() {
     setIsProfileHydrated(true);
   };
   const needsProfileSetup = !profileSetupDone || !displayName.trim() || displayName === "Герой леса";
-  const canClaimDailyEnergy = useMemo(() => {
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dailyClaimCooldownMs = useMemo(() => {
     const last = claimedDailyEnergyAt ? Date.parse(claimedDailyEnergyAt) : 0;
     if (!last) {
-      return true;
+      return 0;
     }
-    return Date.now() - last >= 24 * 60 * 60 * 1000;
-  }, [claimedDailyEnergyAt]);
+    const nextAvailableAt = last + 24 * 60 * 60 * 1000;
+    return Math.max(0, nextAvailableAt - nowMs);
+  }, [claimedDailyEnergyAt, nowMs]);
+
+  const dailyClaimCountdownLabel = useMemo(() => {
+    if (dailyClaimCooldownMs <= 0) {
+      return "Дейли доступен сейчас";
+    }
+    const totalMinutes = Math.ceil(dailyClaimCooldownMs / 60_000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `осталось ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} до обновления дейли`;
+  }, [dailyClaimCooldownMs]);
+
+  const canClaimDailyEnergy = useMemo(() => {
+    return dailyClaimCooldownMs <= 0;
+  }, [dailyClaimCooldownMs]);
   const transferAmountValue = Number(transferAmountInput);
   const canSendEnergyToFriend =
     Boolean(selectedFriendEmail) &&
@@ -8521,8 +8563,7 @@ export default function App() {
       return;
     }
     const nowIso = new Date().toISOString();
-    const last = claimedDailyEnergyAt ? Date.parse(claimedDailyEnergyAt) : 0;
-    if (last && Date.now() - last < 24 * 60 * 60 * 1000) {
+    if (dailyClaimCooldownMs > 0) {
       setPromoInfo("Ежедневная энергия уже получена. Возвращайся завтра.");
       setIsClaimingDailyEnergy(false);
       return;
@@ -10251,6 +10292,7 @@ export default function App() {
                 canClaim={canClaimDailyEnergy && !isClaimingDailyEnergy}
                 style={styles.profileEconomyButton}
               />
+              <Text style={styles.cardMeta}>{dailyClaimCountdownLabel}</Text>
               <Text style={styles.cardTitle}>XP и энергия</Text>
               <Text style={styles.cardText}>XP: {animatedXp} • Энергия: {animatedEnergy}</Text>
               <Text style={styles.cardMeta}>
