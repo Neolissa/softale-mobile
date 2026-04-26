@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "preview": {
@@ -20,7 +21,8 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_AUTH_MODE": "server",
-        "EXPO_PUBLIC_ECONOMY_MODE": "server"
+        "EXPO_PUBLIC_ECONOMY_MODE": "server",
+        "EXPO_PUBLIC_ECONOMY_API_BASE_URL": "https://softale-mobile.onrender.com"
       },
       "android": {
         "buildType": "app-bundle"

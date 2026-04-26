@@ -23,18 +23,35 @@ export type AuthResponse = {
 const AUTH_TOKEN_KEY = "softale_server_token_v1";
 
 function getApiBaseUrl() {
-  return process.env.EXPO_PUBLIC_ECONOMY_API_BASE_URL ?? "http://localhost:3000";
+  const configured = (process.env.EXPO_PUBLIC_ECONOMY_API_BASE_URL ?? "http://localhost:3000").trim().replace(/\/+$/, "");
+  const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(configured);
+  const isHttp = configured.startsWith("http://");
+
+  if (!__DEV__ && isLocalhost) {
+    throw new Error("Release-билд настроен на localhost. Укажи публичный URL backend в EXPO_PUBLIC_ECONOMY_API_BASE_URL.");
+  }
+  if (!__DEV__ && isHttp) {
+    throw new Error("Release-билд должен использовать HTTPS backend URL (EXPO_PUBLIC_ECONOMY_API_BASE_URL).");
+  }
+
+  return configured;
 }
 
 async function request<T>(path: string, options: { method?: "GET" | "POST"; body?: Record<string, unknown>; token?: string } = {}): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  const baseUrl = getApiBaseUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw new Error(`Нет соединения с сервером авторизации (${baseUrl}). Проверь backend URL и доступность сети.`);
+  }
 
   if (!response.ok) {
     let message = `HTTP ${response.status}`;

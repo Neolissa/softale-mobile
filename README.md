@@ -260,6 +260,24 @@ SofTale — мобильная LitRPG-тренировка soft skills в кон
    - `npm run ios` (iOS симулятор)
    - `npm start` (QR + веб-меню Expo)
 
+## Web-версия и GitHub Pages
+
+Если нужно быстро делиться прототипом по ссылке, можно собирать web-версию:
+
+1. Локальная сборка:
+   - `npm run web:build`
+2. Локальный предпросмотр собранной web-версии:
+   - `npm run web:preview`
+
+Автодеплой на GitHub Pages уже настроен через workflow:
+- `.github/workflows/deploy-web-pages.yml`
+- публикация происходит при push в `main` (или вручную через `workflow_dispatch`).
+
+После первого запуска workflow:
+1. В GitHub открой `Settings -> Pages`.
+2. В качестве источника выбери `GitHub Actions`.
+3. Открой ссылку из шага `Deploy to GitHub Pages`.
+
 ## Server mode (production-like)
 
 Для подготовки релиза под RuStore используй server mode:
@@ -272,6 +290,19 @@ SofTale — мобильная LitRPG-тренировка soft skills в кон
    - `EXPO_PUBLIC_ECONOMY_MODE=server`
    - `EXPO_PUBLIC_ECONOMY_API_BASE_URL=http://localhost:3000`
 
+## Production backend (RuStore)
+
+Актуальный публичный backend для релизных сборок:
+
+- `https://softale-mobile.onrender.com`
+- health-check: `https://softale-mobile.onrender.com/health`
+
+Важно:
+
+- Этот URL используется в `eas.json` для профиля `rustore`.
+- Для store-сборки запрещено использовать `localhost` или `127.0.0.1`.
+- Для модерации RuStore auth-smoke должен проходить против этого URL (`register/login/me`).
+
 В этом режиме:
 - регистрация/логин идут через backend auth API;
 - пользователи и профиль хранятся на сервере;
@@ -283,6 +314,7 @@ SofTale — мобильная LitRPG-тренировка soft skills в кон
 
 1. Проверь release-чеклист:
    - `docs/rustore-release-checklist.md`
+   - `docs/clean-release-cycle.md`
 2. Убедись, что backend доступен и работает в server mode.
 3. Собери Android AAB под RuStore:
    - `npm run android:rustore`
@@ -292,6 +324,15 @@ SofTale — мобильная LitRPG-тренировка soft skills в кон
 Примечания:
 - В `eas.json` есть отдельный профиль `rustore` (server-mode env + `app-bundle`).
 - Для production включен автоинкремент build-номера (`autoIncrement`), чтобы не ловить конфликт `versionCode`.
+
+### Чистый релизный цикл (обязательно)
+
+В проекте закреплен единый релизный стандарт:
+
+- `docs/clean-release-cycle.md`
+- `.cursor/rules/release-cycle.md`
+
+Релиз в RuStore выполняется только по этому циклу: security hygiene -> backend readiness -> build/signing -> smoke -> go/no-go.
 
 ## Состояние данных
 
