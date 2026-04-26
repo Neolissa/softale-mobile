@@ -2322,7 +2322,7 @@ const campaignLore: Record<CampaignId, { title: string; setting: string; tone: s
   slytherin: { title: "Гостиная Слизерина", setting: "в подземельях древней академии", tone: "тёмно-академическом", icon: "snake" },
   boss: { title: "Стервозная начальница", setting: "в стеклянной башне корпоративных интриг", tone: "жёсткой рабочей драмы", icon: "briefcase-account-outline" },
   narcissist: { title: "Влюбись в нарцисса", setting: "в зеркальном дворце обещаний и иллюзий", tone: "психологического триллера", icon: "heart-flash" },
-  "sherlock-gaslighter": { title: "Шерлок против газлайтера", setting: "в городе пропавших улик и подмены фактов", tone: "детективно-психологическом", icon: "magnify-scan" },
+  "sherlock-gaslighter": { title: "Шерлок против Лжеца", setting: "в городе пропавших улик и подмены фактов", tone: "детективно-психологическом", icon: "magnify-scan" },
   "cinderella-advocate": { title: "Проклятие хрустальной туфельки", setting: "в доме вежливых уколов и семейного давления", tone: "сказочно-психологическом", icon: "shoe-formal" },
   "healer-empathy": { title: "Лекарь, исцели себя", setting: "в пространстве чужой боли и личной опоры", tone: "тихо-сильном", icon: "medical-bag" },
   "partisan-hq": { title: "Тайный штаб сопротивления", setting: "в подпольном штабе и режиме высоких ставок", tone: "напряженно-стратегическом", icon: "compass-outline" },
@@ -3535,13 +3535,13 @@ const campaignSeed: Record<CampaignId, number> = {
   "mirror-of-truth": 31,
 };
 
-const campaignRhythmProfile: Record<CampaignId, [number, number, number, number, number]> = {
+const campaignRhythmProfile: Record<CampaignId, number[]> = {
   forest: [5, 6, 5, 5, 4],
   romance: [4, 5, 6, 5, 5],
   slytherin: [6, 5, 5, 4, 5],
   boss: [5, 5, 4, 6, 5],
   narcissist: [4, 4, 7, 5, 5],
-  "sherlock-gaslighter": [5, 5, 6, 5, 4],
+  "sherlock-gaslighter": [4, 4, 4, 5, 5, 6, 7],
   "cinderella-advocate": [4, 5, 6, 5, 5],
   "healer-empathy": [5, 4, 5, 6, 5],
   "partisan-hq": [5, 6, 5, 5, 4],
@@ -3969,9 +3969,10 @@ function buildCampaignHintLead(campaign: CampaignId) {
 function getStageIdxByRhythm(campaign: CampaignId, idx: number, total: number) {
   const minStepsPerStage = 3;
   const maxStagesByVolume = Math.max(1, Math.floor(total / minStepsPerStage));
-  const preferredStages = total >= 50 ? 5 : total >= 30 ? 4 : total >= 12 ? 3 : total >= 8 ? 2 : 1;
+  const preferredByRhythm = campaignRhythmProfile[campaign]?.length ?? 5;
+  const preferredStages = total >= 8 ? preferredByRhythm : 1;
   const stageCount = Math.max(1, Math.min(preferredStages, maxStagesByVolume));
-  if (stageCount < 5) {
+  if (stageCount < campaignRhythmProfile[campaign].length) {
     return Math.min(stageCount - 1, Math.floor((idx * stageCount) / Math.max(1, total)));
   }
   const weights = campaignRhythmProfile[campaign];
@@ -3984,7 +3985,7 @@ function getStageIdxByRhythm(campaign: CampaignId, idx: number, total: number) {
       return stage;
     }
   }
-  return 4;
+  return Math.max(0, weights.length - 1);
 }
 
 function normalizeOptionKey(text: string) {
@@ -4397,7 +4398,7 @@ const storyConfigs: StoryConfig[] = [
   },
   {
     id: "sherlock-gaslighter",
-    label: "Шерлок против газлайтера",
+    label: "Шерлок против Лжеца",
     emoji: "🕵️",
     description: "Детективный квест про факты, подмены реальности и спокойную интеллектуальную опору.",
     difficulties: [25],
@@ -9628,8 +9629,6 @@ export default function App() {
                   </View>
                 )}
 
-                {!!stepMessage && <Text style={styles.statusText}>{stepMessage}</Text>}
-
                 <View style={styles.rowWrap}>
                   <Pressable
                     style={styles.primaryButtonInline}
@@ -9641,6 +9640,7 @@ export default function App() {
                     <Text style={styles.buttonPrimaryText}>Сделать ход</Text>
                   </Pressable>
                 </View>
+                {!!stepMessage && <Text style={styles.statusText}>{stepMessage}</Text>}
                 <Modal transparent visible={!!questHintBubbleText} animationType="fade" onRequestClose={closeQuestHintBubble}>
                   <View style={styles.hintModalRoot}>
                     <Pressable style={styles.hintModalBackdrop} onPress={closeQuestHintBubble} />
@@ -9661,7 +9661,7 @@ export default function App() {
                 </View>
                 <CardIllustration name="trophy-outline" />
                 <Text style={styles.cardText}>Шагов пройдено: {currentForestQuestSteps.length}</Text>
-                <Text style={styles.cardText}>Этапов пройдено: 5/5</Text>
+                <Text style={styles.cardText}>Этапов пройдено: {stageCount}/{stageCount}</Text>
                 <Text style={styles.cardText}>Успехов с 1-й попытки: {firstTrySuccess}</Text>
                 <Text style={styles.cardText}>Ошибок всего: {totalErrors}</Text>
                 <Text style={styles.cardText}>Штрафов применено: {penaltyCount}</Text>
