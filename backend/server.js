@@ -34,6 +34,10 @@ const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const LEGACY_DB_PATH = path.join(LEGACY_LOCAL_DATA_DIR, "db.json");
 const DB_BACKUP_KEEP = Number(process.env.DB_BACKUP_KEEP || 30);
 const nowIso = () => new Date().toISOString();
+const EMPATHY_PASS_QUESTIONS_COUNT = 10;
+const EMPATHY_ANSWER_MIN = 0;
+const EMPATHY_ANSWER_MAX = 4;
+const EMPATHY_EVENT_ID = "pair-empathy-quest";
 
 function listBackupFiles() {
   if (!fs.existsSync(BACKUP_DIR)) {
@@ -99,6 +103,7 @@ function ensureDb() {
       paymentOrders: {},
       paymentEvents: [],
       analyticsEvents: [],
+      empathyPairs: {},
       promoCodes: {
         "SOFTALE-START": { energy: 40, expiresAt: "2026-12-31T23:59:59.000Z", maxActivations: 1, activatedBy: [] },
         "RETURN-BOOST": { energy: 80, expiresAt: "2026-09-01T00:00:00.000Z", maxActivations: 1, activatedBy: [] }
@@ -155,6 +160,7 @@ function readDb() {
   db.idempotency ??= {};
   db.referrals ??= [];
   db.analyticsEvents ??= [];
+  db.empathyPairs ??= {};
   const adminUpserted = ensureDefaultAdmin(db);
   if (adminUpserted) {
     writeDb(db);
@@ -329,6 +335,96 @@ function applyWalletDelta(db, user, deltaEnergy, deltaXp, reason, meta = {}) {
     reason,
     meta
   });
+}
+
+function normalizeAnswers(input) {
+  if (!Array.isArray(input) || input.length !== EMPATHY_PASS_QUESTIONS_COUNT) {
+    return null;
+  }
+  const normalized = input.map((value) => Number(value));
+  const isValid = normalized.every(
+    (value) => Number.isInteger(value) && value >= EMPATHY_ANSWER_MIN && value <= EMPATHY_ANSWER_MAX
+  );
+  return isValid ? normalized : null;
+}
+
+function percentMatch(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || !a.length || a.length !== b.length) {
+    return 0;
+  }
+  const matches = a.reduce((acc, value, idx) => (value === b[idx] ? acc + 1 : acc), 0);
+  return Math.round((matches / a.length) * 100);
+}
+
+function resolveEmpathyAchievement(overallEmpathyPercent) {
+  if (overallEmpathyPercent >= 85) return "Эмпатический резонанс";
+  if (overallEmpathyPercent >= 70) return "Точная настройка";
+  if (overallEmpathyPercent >= 50) return "Слышим друг друга";
+  if (overallEmpathyPercent >= 30) return "Разговор в сборке";
+  return "Пока мимо волны";
+}
+
+function buildEmpathyPairView(pair, currentEmail) {
+  const memberA = pair.members[0];
+  const memberB = pair.members[1];
+  const counterpartEmail = currentEmail === memberA ? memberB : memberA;
+  const me = pair.passes[currentEmail] ?? {};
+  const counterpart = pair.passes[counterpartEmail] ?? {};
+  return {
+    id: pair.id,
+    eventId: pair.eventId,
+    members: pair.members,
+    counterpartEmail,
+    createdBy: pair.createdBy,
+    createdAt: pair.createdAt,
+    updatedAt: pair.updatedAt,
+    completedAt: pair.completedAt ?? null,
+    report: pair.report ?? null,
+    me: {
+      selfActualDone: Array.isArray(me.self_actual),
+      friendPredictionDone: Array.isArray(me.friend_predicted_by_me),
+      selfActualAnswers: Array.isArray(me.self_actual) ? me.self_actual : null,
+      friendPredictionAnswers: Array.isArray(me.friend_predicted_by_me) ? me.friend_predicted_by_me : null,
+    },
+    counterpart: {
+      selfActualDone: Array.isArray(counterpart.self_actual),
+      friendPredictionDone: Array.isArray(counterpart.friend_predicted_by_me),
+    },
+  };
+}
+
+function refreshEmpathyPairReport(pair) {
+  const memberA = pair.members[0];
+  const memberB = pair.members[1];
+  const passesA = pair.passes[memberA] ?? {};
+  const passesB = pair.passes[memberB] ?? {};
+  if (
+    !Array.isArray(passesA.self_actual) ||
+    !Array.isArray(passesA.friend_predicted_by_me) ||
+    !Array.isArray(passesB.self_actual) ||
+    !Array.isArray(passesB.friend_predicted_by_me)
+  ) {
+    pair.report = null;
+    pair.completedAt = null;
+    return false;
+  }
+
+  const memberAEmpathyPercent = percentMatch(passesA.friend_predicted_by_me, passesB.self_actual);
+  const memberBEmpathyPercent = percentMatch(passesB.friend_predicted_by_me, passesA.self_actual);
+  const answersOverlapPercent = percentMatch(passesA.self_actual, passesB.self_actual);
+  const overallEmpathyPercent = Math.round((memberAEmpathyPercent + memberBEmpathyPercent) / 2);
+  const achievement = resolveEmpathyAchievement(overallEmpathyPercent);
+  pair.report = {
+    answersOverlapPercent,
+    overallEmpathyPercent,
+    achievement,
+    perMember: {
+      [memberA]: { empathyPercent: memberAEmpathyPercent },
+      [memberB]: { empathyPercent: memberBEmpathyPercent },
+    },
+  };
+  pair.completedAt = nowIso();
+  return true;
 }
 
 function idempotentGuard(req, db) {
@@ -540,6 +636,106 @@ app.post("/v1/analytics/event", (req, res) => {
   user.updatedAt = nowIso();
   writeDb(db);
   return res.status(201).json({ ok: true, id: event.id });
+});
+
+app.post("/v1/empathy/pairs/invite", (req, res) => {
+  const db = readDb();
+  const user = getUserByToken(req, res, db);
+  if (!user) return;
+
+  const friendEmail = normalizeEmail(req.body.friendEmail);
+  if (!friendEmail || !friendEmail.includes("@")) {
+    return res.status(400).json({ error: "Invalid friend email" });
+  }
+  if (friendEmail === user.email) {
+    return res.status(409).json({ error: "Cannot invite yourself" });
+  }
+  if (!db.users[friendEmail]) {
+    return res.status(404).json({ error: "Friend user not found" });
+  }
+
+  const existingPair = Object.values(db.empathyPairs).find(
+    (pair) =>
+      pair &&
+      pair.eventId === EMPATHY_EVENT_ID &&
+      Array.isArray(pair.members) &&
+      pair.members.includes(user.email) &&
+      pair.members.includes(friendEmail)
+  );
+  if (existingPair) {
+    return res.status(200).json({ pair: buildEmpathyPairView(existingPair, user.email) });
+  }
+
+  const pairId = crypto.randomUUID();
+  const nextPair = {
+    id: pairId,
+    eventId: EMPATHY_EVENT_ID,
+    members: [user.email, friendEmail],
+    createdBy: user.email,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    completedAt: null,
+    report: null,
+    passes: {
+      [user.email]: {
+        self_actual: null,
+        friend_predicted_by_me: null,
+      },
+      [friendEmail]: {
+        self_actual: null,
+        friend_predicted_by_me: null,
+      },
+    },
+  };
+  db.empathyPairs[pairId] = nextPair;
+  writeDb(db);
+  return res.status(201).json({ pair: buildEmpathyPairView(nextPair, user.email) });
+});
+
+app.get("/v1/empathy/pairs", (req, res) => {
+  const db = readDb();
+  const user = getUserByToken(req, res, db);
+  if (!user) return;
+
+  const pairs = Object.values(db.empathyPairs)
+    .filter((pair) => pair && Array.isArray(pair.members) && pair.members.includes(user.email))
+    .sort((a, b) => Date.parse(b.updatedAt || b.createdAt || "") - Date.parse(a.updatedAt || a.createdAt || ""))
+    .map((pair) => buildEmpathyPairView(pair, user.email));
+
+  return res.json({ pairs });
+});
+
+app.post("/v1/empathy/pairs/:pairId/pass", (req, res) => {
+  const db = readDb();
+  const user = getUserByToken(req, res, db);
+  if (!user) return;
+
+  const pairId = String(req.params.pairId || "");
+  const pair = db.empathyPairs[pairId];
+  if (!pair || !Array.isArray(pair.members)) {
+    return res.status(404).json({ error: "Empathy pair not found" });
+  }
+  if (!pair.members.includes(user.email)) {
+    return res.status(403).json({ error: "You are not a member of this pair" });
+  }
+
+  const passType = String(req.body.passType || "");
+  if (passType !== "self_actual" && passType !== "friend_predicted_by_me") {
+    return res.status(400).json({ error: "Invalid pass type" });
+  }
+  const answers = normalizeAnswers(req.body.answers);
+  if (!answers) {
+    return res.status(400).json({
+      error: `Answers must be an array of ${EMPATHY_PASS_QUESTIONS_COUNT} integers (${EMPATHY_ANSWER_MIN}-${EMPATHY_ANSWER_MAX})`,
+    });
+  }
+
+  pair.passes[user.email] ??= { self_actual: null, friend_predicted_by_me: null };
+  pair.passes[user.email][passType] = answers;
+  pair.updatedAt = nowIso();
+  refreshEmpathyPairReport(pair);
+  writeDb(db);
+  return res.json({ pair: buildEmpathyPairView(pair, user.email) });
 });
 
 app.get("/v1/admin/metrics", (req, res) => {

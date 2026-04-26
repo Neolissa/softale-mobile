@@ -3,11 +3,12 @@ import { Audio } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentProps, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCampaignBlockArc, getCampaignNodes, seasonalEventMvp, type QuestNarrativeNode, type SeasonalEventStep } from "./questContent";
 import { economyApi, type EconomySnapshot } from "./economyApi";
 import { authApi } from "./authApi";
 import { analyticsApi, type AdminMetricsResponse } from "./analyticsApi";
+import { empathyApi, type EmpathyPairView, type EmpathyPassType } from "./empathyApi";
 import { achievementEmojiByCampaignTier, editorialEndingByCampaignTier, editorialStepOptionsByCampaign } from "./scenarioBible";
 import {
   ActivityIndicator,
@@ -2320,7 +2321,7 @@ const campaignLore: Record<CampaignId, { title: string; setting: string; tone: s
   romance: { title: "Любовный роман", setting: "в городе лунных мостов и поздних признаний", tone: "романтическом и хрупком", icon: "heart-multiple" },
   slytherin: { title: "Гостиная Слизерина", setting: "в подземельях древней академии", tone: "тёмно-академическом", icon: "snake" },
   boss: { title: "Стервозная начальница", setting: "в стеклянной башне корпоративных интриг", tone: "жёсткой рабочей драмы", icon: "briefcase-account-outline" },
-  narcissist: { title: "Влюбись в нарцисса", setting: "в зеркальном дворце обещаний и иллюзий", tone: "психологического триллера", icon: "account-heart-outline" },
+  narcissist: { title: "Влюбись в нарцисса", setting: "в зеркальном дворце обещаний и иллюзий", tone: "психологического триллера", icon: "heart-flash" },
   "sherlock-gaslighter": { title: "Шерлок против газлайтера", setting: "в городе пропавших улик и подмены фактов", tone: "детективно-психологическом", icon: "magnify-scan" },
   "cinderella-advocate": { title: "Проклятие хрустальной туфельки", setting: "в доме вежливых уколов и семейного давления", tone: "сказочно-психологическом", icon: "shoe-formal" },
   "healer-empathy": { title: "Лекарь, исцели себя", setting: "в пространстве чужой боли и личной опоры", tone: "тихо-сильном", icon: "medical-bag" },
@@ -2334,7 +2335,7 @@ const campaignLore: Record<CampaignId, { title: string; setting: string; tone: s
   hufflepuff_common_room: { title: "Гостиная Пуффендуя", setting: "в теплой комнате, где избегают острых тем", tone: "мягко-напряженном", icon: "flower-outline" },
   "office-icebreaker": { title: "Ледокол переговоров", setting: "на ледяном флоте переговоров", tone: "лидерского приключения", icon: "ferry" },
   "boundary-keeper": { title: "Хранитель границ", setting: "в каменной крепости личных клятв", tone: "героического взросления", icon: "shield-outline" },
-  "serpentine-diplomat": { title: "Кулуарная дипломатия", setting: "в лабиринте власти, слухов и альянсов", tone: "интриги и высокого риска", icon: "snake" },
+  "serpentine-diplomat": { title: "Кулуарная дипломатия", setting: "в лабиринте власти, слухов и альянсов", tone: "интриги и высокого риска", icon: "scale-balance" },
   "heart-lines": { title: "Линии сердца", setting: "в кварталах близости и сомнений", tone: "чувственной психологической арки", icon: "heart-outline" },
   "mirror-of-truth": { title: "Зеркало правды", setting: "в цитадели отражений", tone: "внутренней драмы и прозрения", icon: "mirror" },
 };
@@ -4480,7 +4481,7 @@ const storyConfigs: StoryConfig[] = [
   },
 ];
 
-const adultOnlyStories: QuestStory[] = ["narcissist", "stop-crane-train-18plus"];
+const adultOnlyStories: QuestStory[] = ["narcissist", "stop-crane-train-18plus", "healer-empathy"];
 
 function buildForestQuestByDifficulty(questions: QuestDifficulty, story: QuestStory): ForestStep[] {
   try {
@@ -4642,10 +4643,36 @@ const uiEmojiLibrary = {
 const courseIllustrationById: Record<CourseId, IllustrationName> = {
   "office-icebreaker": "ferry",
   "boundary-keeper": "shield-outline",
-  "serpentine-diplomat": "snake",
+  "serpentine-diplomat": "scale-balance",
   "heart-lines": "heart-multiple",
   "mirror-of-truth": "mirror",
 };
+
+const eventIllustrationById = {
+  "mindful-communication-month": "account-group",
+  "pair-empathy-quest": "account-heart",
+} as const satisfies Record<string, IllustrationName>;
+
+const pairEmpathyQuestionBank = [
+  "Друг задержался и пишет односложные ответы. Что он выберет как первый ход?",
+  "На созвоне его перебили. Каким будет его короткий ответ?",
+  "Ему навязывают срочную задачу вечером. Как он отреагирует?",
+  "После конфликта ему нужно вернуть контакт. Что он скажет?",
+  "Его укололи фразой «ты слишком чувствительный». Что дальше?",
+  "Друг видит, что дедлайн нереалистичный. Как обозначит позицию?",
+  "Ему предлагают сделать работу за коллегу «по дружбе». Какой выбор вероятнее?",
+  "В чате на него давят виной. Как он удержит границу?",
+  "Нужно отказать без разрыва отношений. Как он сформулирует?",
+  "Команда спорит, кто виноват. Что он выберет как лидерский ход?",
+] as const;
+
+const pairEmpathyOptions = [
+  "Сглажу и уступлю, чтобы не обострять",
+  "Отвечу резко, чтобы сразу пресечь давление",
+  "Промолчу и отложу разговор",
+  "Обозначу границу и предложу следующий шаг",
+  "Уйду в шутку и переведу тему",
+] as const;
 
 const imageRules = [
   "Навигация и действия: только Feather иконки.",
@@ -5376,6 +5403,16 @@ export default function App() {
   const [eventStepErrorCount, setEventStepErrorCount] = useState(0);
   const [eventStepMessage, setEventStepMessage] = useState("Вступи в ивент и запусти первый шаг.");
   const [eventShowHint, setEventShowHint] = useState(false);
+  const [empathyPairs, setEmpathyPairs] = useState<EmpathyPairView[]>([]);
+  const [pairFriendEmailDraft, setPairFriendEmailDraft] = useState("");
+  const [pairEventMessage, setPairEventMessage] = useState("");
+  const [pairInviteLoading, setPairInviteLoading] = useState(false);
+  const [pairSubmitLoading, setPairSubmitLoading] = useState(false);
+  const [activePairId, setActivePairId] = useState<string | null>(null);
+  const [activePairPassType, setActivePairPassType] = useState<EmpathyPassType | null>(null);
+  const [activePairAnswers, setActivePairAnswers] = useState<number[]>(
+    Array.from({ length: pairEmpathyQuestionBank.length }, () => -1)
+  );
   const [forestStepIndex, setForestStepIndex] = useState(0);
   const [forestStarted, setForestStarted] = useState(false);
   const [forestFinished, setForestFinished] = useState(false);
@@ -5506,6 +5543,7 @@ export default function App() {
   useEffect(() => {
     (globalThis as Record<string, unknown>).__SOFTALE_ACTIVE_TAB__ = activeTab;
   }, [activeTab]);
+
 
   const mapSearchInputRef = useRef<TextInput | null>(null);
   useEffect(() => {
@@ -6636,6 +6674,88 @@ export default function App() {
     setEventProgress((prev) => ({ ...prev, penalties: prev.penalties + 1 }));
     passSeasonEventStep(false);
   };
+
+  const refreshEmpathyPairs = useCallback(async () => {
+    if (authBackendMode !== "server" || !currentUserEmail) {
+      return;
+    }
+    try {
+      const response = await empathyApi.listPairs();
+      setEmpathyPairs(response.pairs);
+    } catch (error) {
+      setPairEventMessage(error instanceof Error ? error.message : "Не удалось загрузить парный ивент.");
+    }
+  }, [authBackendMode, currentUserEmail]);
+
+  const inviteToEmpathyPair = async () => {
+    if (authBackendMode !== "server") {
+      setPairEventMessage("Парный ивент доступен только в server-режиме авторизации.");
+      return;
+    }
+    const friendEmail = pairFriendEmailDraft.trim().toLowerCase();
+    if (!friendEmail.includes("@")) {
+      setPairEventMessage("Введи корректный email друга.");
+      return;
+    }
+    setPairInviteLoading(true);
+    try {
+      const response = await empathyApi.invite(friendEmail);
+      setEmpathyPairs((prev) => {
+        const withoutCurrent = prev.filter((pair) => pair.id !== response.pair.id);
+        return [response.pair, ...withoutCurrent];
+      });
+      setPairFriendEmailDraft("");
+      setPairEventMessage("Пара создана. Теперь оба проходите 2 серии вопросов.");
+    } catch (error) {
+      setPairEventMessage(error instanceof Error ? error.message : "Не удалось создать парный ивент.");
+    } finally {
+      setPairInviteLoading(false);
+    }
+  };
+
+  const startEmpathyPass = (pair: EmpathyPairView, passType: EmpathyPassType) => {
+    setActivePairId(pair.id);
+    setActivePairPassType(passType);
+    const savedAnswers = passType === "self_actual" ? pair.me.selfActualAnswers : pair.me.friendPredictionAnswers;
+    setActivePairAnswers(
+      Array.from({ length: pairEmpathyQuestionBank.length }, (_, idx) => (Array.isArray(savedAnswers) ? (savedAnswers[idx] ?? -1) : -1))
+    );
+  };
+
+  const submitEmpathyPass = async () => {
+    if (!activePairId || !activePairPassType) {
+      setPairEventMessage("Выбери пару и тип проходки.");
+      return;
+    }
+    if (activePairAnswers.some((value) => value < 0)) {
+      setPairEventMessage("Заполни все ответы, чтобы отправить проходку.");
+      return;
+    }
+    setPairSubmitLoading(true);
+    try {
+      const response = await empathyApi.submitPass(activePairId, activePairPassType, activePairAnswers);
+      setEmpathyPairs((prev) => {
+        const withoutCurrent = prev.filter((pair) => pair.id !== response.pair.id);
+        return [response.pair, ...withoutCurrent];
+      });
+      setPairEventMessage("Проходка сохранена.");
+      setActivePairId(null);
+      setActivePairPassType(null);
+      setActivePairAnswers(Array.from({ length: pairEmpathyQuestionBank.length }, () => -1));
+      await refreshEmpathyPairs();
+    } catch (error) {
+      setPairEventMessage(error instanceof Error ? error.message : "Не удалось сохранить проходку.");
+    } finally {
+      setPairSubmitLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== "event" || authBackendMode !== "server" || !currentUserEmail) {
+      return;
+    }
+    refreshEmpathyPairs().catch(() => undefined);
+  }, [activeTab, authBackendMode, currentUserEmail, refreshEmpathyPairs]);
 
   const openStageFromRoad = async (stageIdx: number) => {
     const startIdx = stageStartIndices[stageIdx];
@@ -9095,22 +9215,7 @@ export default function App() {
                 const storyStatus = storyStatusById[story.id];
                 const completedEnding = completedStoryEndingById[story.id];
                 const isAdultLocked = !isAdult18Plus && adultOnlyStories.includes(story.id);
-                const storyIllustration: IllustrationName =
-                  story.id === "forest"
-                    ? "forest"
-                    : story.id === "romance"
-                    ? "heart-multiple"
-                    : story.id === "slytherin"
-                    ? "snake"
-                    : story.id === "boss"
-                    ? "briefcase-account-outline"
-                    : story.id === "gryffindor_common_room"
-                    ? "fire-circle"
-                    : story.id === "ravenclaw_common_room"
-                    ? "book-open-page-variant-outline"
-                    : story.id === "hufflepuff_common_room"
-                    ? "flower-outline"
-                    : "account-heart-outline";
+                const storyIllustration: IllustrationName = campaignLore[story.id].icon;
 
                 return (
                   <AppCard key={`story-card-${story.id}`}>
@@ -9201,7 +9306,7 @@ export default function App() {
                 <Feather name="users" size={imageSizes.cardLeadingIcon} color={colors.textPrimary} />
                 <Text style={styles.cardTitle}>Парный эмпатический квест</Text>
               </View>
-              <CardIllustration name="account-heart" />
+              <CardIllustration name={eventIllustrationById["pair-empathy-quest"]} />
               <Text style={styles.cardText}>
                 Сценарий недели: поддержать персонажа, который боится отказать руководителю.
               </Text>
@@ -9747,6 +9852,141 @@ export default function App() {
                       onPress={() => setEventShowHint((prev) => !prev)}
                     />
                   </View>
+                </>
+              )}
+            </AppCard>
+
+            <AppCard>
+              <View style={styles.cardTitleRow}>
+                <Feather name="users" size={imageSizes.cardLeadingIcon} color={colors.textPrimary} />
+                <Text style={styles.cardTitle}>Парный эмпатический квест</Text>
+              </View>
+              <CardIllustration name={eventIllustrationById["pair-empathy-quest"]} />
+              <Text style={styles.cardText}>
+                Пройди 2 проходки: сначала за себя, затем угадай ответы друга. Друг делает то же самое на своем аккаунте.
+              </Text>
+              {authBackendMode !== "server" ? (
+                <Text style={styles.authError}>Нужен server-режим, чтобы синхронизировать проходки между двумя аккаунтами.</Text>
+              ) : (
+                <>
+                  <TextInput
+                    value={pairFriendEmailDraft}
+                    onChangeText={setPairFriendEmailDraft}
+                    placeholder="Email друга для инвайта"
+                    placeholderTextColor={colors.textSecondary}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    style={styles.promoInput}
+                  />
+                  <View style={styles.profileEconomyActionStack}>
+                    <AppButton
+                      label={pairInviteLoading ? "Отправляем..." : "Создать пару"}
+                      onPress={inviteToEmpathyPair}
+                      disabled={pairInviteLoading}
+                      style={styles.profileEconomyButton}
+                    />
+                    <AppButton
+                      label="Обновить пары"
+                      variant="secondary"
+                      onPress={() => refreshEmpathyPairs().catch(() => undefined)}
+                      style={styles.profileEconomyButton}
+                    />
+                  </View>
+                  {!!pairEventMessage && <Text style={styles.statusText}>{pairEventMessage}</Text>}
+
+                  {empathyPairs.map((pair) => {
+                    const selfEmpathy =
+                      currentUserEmail && pair.report?.perMember
+                        ? pair.report.perMember[currentUserEmail]?.empathyPercent ?? null
+                        : null;
+                    return (
+                      <View key={`pair-event-${pair.id}`} style={styles.achievementDetailBox}>
+                        <Text style={styles.cardText}>Пара с: {pair.counterpartEmail}</Text>
+                        <Text style={styles.cardMeta}>
+                          Ты: {pair.me.selfActualDone ? "за себя готово" : "за себя не пройдено"} /{" "}
+                          {pair.me.friendPredictionDone ? "за друга готово" : "за друга не пройдено"}
+                        </Text>
+                        <Text style={styles.cardMeta}>
+                          Друг: {pair.counterpart.selfActualDone ? "за себя готово" : "за себя не пройдено"} /{" "}
+                          {pair.counterpart.friendPredictionDone ? "за тебя готово" : "за тебя не пройдено"}
+                        </Text>
+                        {pair.report ? (
+                          <>
+                            <Text style={styles.cardMeta}>Совпадение ваших реальных ответов: {pair.report.answersOverlapPercent}%</Text>
+                            <Text style={styles.cardMeta}>Твой уровень эмпатии: {selfEmpathy ?? 0}%</Text>
+                            <Text style={styles.cardMeta}>Общий эмпатический процент: {pair.report.overallEmpathyPercent}%</Text>
+                            <Text style={styles.cardText}>Ачивка пары: {pair.report.achievement}</Text>
+                          </>
+                        ) : (
+                          <Text style={styles.cardMeta}>Финальный отчет появится после 4 проходок (по 2 от каждого).</Text>
+                        )}
+                        <View style={styles.profileEconomyActionStack}>
+                          <AppButton
+                            label="Пройти за себя"
+                            variant={pair.me.selfActualDone ? "secondary" : "primary"}
+                            onPress={() => startEmpathyPass(pair, "self_actual")}
+                            style={styles.profileEconomyButton}
+                          />
+                          <AppButton
+                            label="Пройти за друга"
+                            variant={pair.me.friendPredictionDone ? "secondary" : "primary"}
+                            onPress={() => startEmpathyPass(pair, "friend_predicted_by_me")}
+                            style={styles.profileEconomyButton}
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+
+                  {activePairId && activePairPassType && (
+                    <View style={styles.builderWrap}>
+                      <Text style={styles.sectionLabel}>
+                        {activePairPassType === "self_actual"
+                          ? "Проходка 1/2: отвечаешь за себя"
+                          : "Проходка 2/2: угадываешь ответы друга"}
+                      </Text>
+                      {pairEmpathyQuestionBank.map((question, questionIdx) => (
+                        <View key={`pair-q-${questionIdx}`} style={styles.courseExperimentBox}>
+                          <Text style={styles.cardText}>
+                            {questionIdx + 1}. {question}
+                          </Text>
+                          {pairEmpathyOptions.map((option, optionIdx) => (
+                            <Pressable
+                              key={`pair-q-${questionIdx}-opt-${optionIdx}`}
+                              style={[styles.optionCard, activePairAnswers[questionIdx] === optionIdx && styles.optionCardActive]}
+                              onPress={() =>
+                                setActivePairAnswers((prev) => {
+                                  const next = [...prev];
+                                  next[questionIdx] = optionIdx;
+                                  return next;
+                                })
+                              }
+                            >
+                              <Text style={styles.optionText}>{option}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      ))}
+                      <View style={styles.profileEconomyActionStack}>
+                        <AppButton
+                          label={pairSubmitLoading ? "Сохраняем..." : "Сохранить проходку"}
+                          onPress={submitEmpathyPass}
+                          disabled={pairSubmitLoading}
+                          style={styles.profileEconomyButton}
+                        />
+                        <AppButton
+                          label="Отменить"
+                          variant="secondary"
+                          onPress={() => {
+                            setActivePairId(null);
+                            setActivePairPassType(null);
+                            setActivePairAnswers(Array.from({ length: pairEmpathyQuestionBank.length }, () => -1));
+                          }}
+                          style={styles.profileEconomyButton}
+                        />
+                      </View>
+                    </View>
+                  )}
                 </>
               )}
             </AppCard>

@@ -9,6 +9,7 @@ const filesToScan = [
   path.join(root, "scenarioBible.ts"),
   path.join(root, "questContent.ts"),
 ];
+const appFilePath = path.join(root, "App.tsx");
 
 const bannedMarkers = ["needsEditorialFill", "временный placeholder", "Контент шага в редактуре"];
 
@@ -118,6 +119,82 @@ function lineOf(content, index) {
   return content.slice(0, index).split("\n").length;
 }
 
+function extractObjectBlock(content, anchor) {
+  const anchorIdx = content.indexOf(anchor);
+  if (anchorIdx < 0) {
+    return null;
+  }
+  const braceStart = content.indexOf("{", anchorIdx);
+  if (braceStart < 0) {
+    return null;
+  }
+  let i = braceStart + 1;
+  let depth = 1;
+  let inQuote = false;
+  let quote = "";
+  let escaped = false;
+  while (i < content.length && depth > 0) {
+    const ch = content[i];
+    if (inQuote) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === quote) {
+        inQuote = false;
+        quote = "";
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = true;
+      quote = ch;
+    } else if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+    }
+    i += 1;
+  }
+  if (depth !== 0) {
+    return null;
+  }
+  return content.slice(braceStart, i);
+}
+
+function collectIconsForUniquenessAudit(content) {
+  const records = [];
+  const campaignBlock = extractObjectBlock(content, "const campaignLore:");
+  if (campaignBlock) {
+    const iconRegex = /([a-zA-Z0-9_"-]+)\s*:\s*\{[^{}]*icon:\s*"([^"]+)"/g;
+    let match = iconRegex.exec(campaignBlock);
+    while (match) {
+      records.push({ scope: "campaign", id: match[1].replace(/"/g, ""), icon: match[2] });
+      match = iconRegex.exec(campaignBlock);
+    }
+  }
+
+  const courseBlock = extractObjectBlock(content, "const courseIllustrationById:");
+  if (courseBlock) {
+    const iconRegex = /"([^"]+)"\s*:\s*"([^"]+)"/g;
+    let match = iconRegex.exec(courseBlock);
+    while (match) {
+      records.push({ scope: "course", id: match[1], icon: match[2] });
+      match = iconRegex.exec(courseBlock);
+    }
+  }
+
+  const eventBlock = extractObjectBlock(content, "const eventIllustrationById");
+  if (eventBlock) {
+    const iconRegex = /"([^"]+)"\s*:\s*"([^"]+)"/g;
+    let match = iconRegex.exec(eventBlock);
+    while (match) {
+      records.push({ scope: "event", id: match[1], icon: match[2] });
+      match = iconRegex.exec(eventBlock);
+    }
+  }
+
+  return records;
+}
+
 function run() {
   const issues = [];
 
@@ -169,6 +246,29 @@ function run() {
       });
     });
   }
+
+  const appContent = read(appFilePath);
+  const iconRecords = collectIconsForUniquenessAudit(appContent);
+  const iconOwners = new Map();
+  iconRecords.forEach((item) => {
+    if (!item.icon) return;
+    const entityId = String(item.id);
+    const owner = `${item.scope}:${entityId}`;
+    const prev = iconOwners.get(item.icon);
+    if (!prev) {
+      iconOwners.set(item.icon, { owner, entityId });
+      return;
+    }
+    if (prev.entityId === entityId) {
+      return;
+    }
+    issues.push({
+      file: appFilePath,
+      line: 1,
+      type: "duplicate-card-icon",
+      detail: `Иконка "${item.icon}" повторяется: ${prev.owner} и ${owner}`,
+    });
+  });
 
   if (issues.length) {
     console.error("[content:audit] FAIL");
