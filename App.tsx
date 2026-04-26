@@ -4653,18 +4653,32 @@ const eventIllustrationById = {
   "pair-empathy-quest": "account-heart",
 } as const satisfies Record<string, IllustrationName>;
 
-const pairEmpathyQuestionBank = [
-  "Друг задержался и пишет односложные ответы. Что он выберет как первый ход?",
-  "На созвоне его перебили. Каким будет его короткий ответ?",
-  "Ему навязывают срочную задачу вечером. Как он отреагирует?",
-  "После конфликта ему нужно вернуть контакт. Что он скажет?",
-  "Его укололи фразой «ты слишком чувствительный». Что дальше?",
-  "Друг видит, что дедлайн нереалистичный. Как обозначит позицию?",
-  "Ему предлагают сделать работу за коллегу «по дружбе». Какой выбор вероятнее?",
-  "В чате на него давят виной. Как он удержит границу?",
-  "Нужно отказать без разрыва отношений. Как он сформулирует?",
-  "Команда спорит, кто виноват. Что он выберет как лидерский ход?",
-] as const;
+const pairEmpathyQuestionBankByPassType = {
+  self_actual: [
+    "Друг задержался и пишет односложные ответы. Что ты выберешь как первый ход?",
+    "На созвоне тебя перебили. Каким будет твой короткий ответ?",
+    "Тебе навязывают срочную задачу вечером. Как ты отреагируешь?",
+    "После конфликта тебе нужно вернуть контакт. Что ты скажешь?",
+    "Тебя укололи фразой «ты слишком чувствительный». Что ты сделаешь дальше?",
+    "Ты видишь, что дедлайн нереалистичный. Как обозначишь позицию?",
+    "Тебе предлагают сделать работу за коллегу «по дружбе». Какой выбор ты сделаешь?",
+    "В чате на тебя давят виной. Как ты удержишь границу?",
+    "Нужно отказать без разрыва отношений. Как ты сформулируешь отказ?",
+    "Команда спорит, кто виноват. Какой лидерский ход выберешь ты?",
+  ],
+  friend_predicted_by_me: [
+    "Друг задержался и пишет односложные ответы. Что он выберет как первый ход?",
+    "На созвоне его перебили. Каким будет его короткий ответ?",
+    "Ему навязывают срочную задачу вечером. Как он отреагирует?",
+    "После конфликта ему нужно вернуть контакт. Что он скажет?",
+    "Его укололи фразой «ты слишком чувствительный». Что дальше?",
+    "Друг видит, что дедлайн нереалистичный. Как обозначит позицию?",
+    "Ему предлагают сделать работу за коллегу «по дружбе». Какой выбор вероятнее?",
+    "В чате на него давят виной. Как он удержит границу?",
+    "Нужно отказать без разрыва отношений. Как он сформулирует?",
+    "Команда спорит, кто виноват. Что он выберет как лидерский ход?",
+  ],
+} as const satisfies Record<EmpathyPassType, readonly string[]>;
 
 const pairEmpathyOptions = [
   "Сглажу и уступлю, чтобы не обострять",
@@ -5411,7 +5425,7 @@ export default function App() {
   const [activePairId, setActivePairId] = useState<string | null>(null);
   const [activePairPassType, setActivePairPassType] = useState<EmpathyPassType | null>(null);
   const [activePairAnswers, setActivePairAnswers] = useState<number[]>(
-    Array.from({ length: pairEmpathyQuestionBank.length }, () => -1)
+    Array.from({ length: pairEmpathyQuestionBankByPassType.self_actual.length }, () => -1)
   );
   const [forestStepIndex, setForestStepIndex] = useState(0);
   const [forestStarted, setForestStarted] = useState(false);
@@ -6717,8 +6731,9 @@ export default function App() {
     setActivePairId(pair.id);
     setActivePairPassType(passType);
     const savedAnswers = passType === "self_actual" ? pair.me.selfActualAnswers : pair.me.friendPredictionAnswers;
+    const questionSet = pairEmpathyQuestionBankByPassType[passType];
     setActivePairAnswers(
-      Array.from({ length: pairEmpathyQuestionBank.length }, (_, idx) => (Array.isArray(savedAnswers) ? (savedAnswers[idx] ?? -1) : -1))
+      Array.from({ length: questionSet.length }, (_, idx) => (Array.isArray(savedAnswers) ? (savedAnswers[idx] ?? -1) : -1))
     );
   };
 
@@ -6741,7 +6756,7 @@ export default function App() {
       setPairEventMessage("Проходка сохранена.");
       setActivePairId(null);
       setActivePairPassType(null);
-      setActivePairAnswers(Array.from({ length: pairEmpathyQuestionBank.length }, () => -1));
+      setActivePairAnswers(Array.from({ length: pairEmpathyQuestionBankByPassType.self_actual.length }, () => -1));
       await refreshEmpathyPairs();
     } catch (error) {
       setPairEventMessage(error instanceof Error ? error.message : "Не удалось сохранить проходку.");
@@ -9945,7 +9960,7 @@ export default function App() {
                           ? "Проходка 1/2: отвечаешь за себя"
                           : "Проходка 2/2: угадываешь ответы друга"}
                       </Text>
-                      {pairEmpathyQuestionBank.map((question, questionIdx) => (
+                      {pairEmpathyQuestionBankByPassType[activePairPassType].map((question, questionIdx) => (
                         <View key={`pair-q-${questionIdx}`} style={styles.courseExperimentBox}>
                           <Text style={styles.cardText}>
                             {questionIdx + 1}. {question}
@@ -9980,7 +9995,7 @@ export default function App() {
                           onPress={() => {
                             setActivePairId(null);
                             setActivePairPassType(null);
-                            setActivePairAnswers(Array.from({ length: pairEmpathyQuestionBank.length }, () => -1));
+                            setActivePairAnswers(Array.from({ length: pairEmpathyQuestionBankByPassType.self_actual.length }, () => -1));
                           }}
                           style={styles.profileEconomyButton}
                         />
