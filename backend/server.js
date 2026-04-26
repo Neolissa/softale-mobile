@@ -13,10 +13,25 @@ const YOOKASSA_WEBHOOK_SECRET = process.env.YOOKASSA_WEBHOOK_SECRET || "dev-yook
 const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || "neolissa@gmail.com";
 const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "neolissaAdmin1001001";
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const PERSISTENT_DATA_DIR = "/var/data";
+const LEGACY_LOCAL_DATA_DIR = path.join(__dirname, "data");
+
+function resolveDataDir() {
+  const envDir = String(process.env.DATA_DIR || "").trim();
+  if (envDir) {
+    return envDir;
+  }
+  if (fs.existsSync(PERSISTENT_DATA_DIR)) {
+    return PERSISTENT_DATA_DIR;
+  }
+  return LEGACY_LOCAL_DATA_DIR;
+}
+
+const DATA_DIR = resolveDataDir();
 const DB_PATH = path.join(DATA_DIR, "db.json");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
+const LEGACY_DB_PATH = path.join(LEGACY_LOCAL_DATA_DIR, "db.json");
 const DB_BACKUP_KEEP = Number(process.env.DB_BACKUP_KEEP || 30);
 const nowIso = () => new Date().toISOString();
 
@@ -65,6 +80,15 @@ function ensureDb() {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
   if (!fs.existsSync(DB_PATH)) {
+    if (DB_PATH !== LEGACY_DB_PATH && fs.existsSync(LEGACY_DB_PATH)) {
+      try {
+        fs.copyFileSync(LEGACY_DB_PATH, DB_PATH);
+        console.warn(`[softale-backend] migrated db from legacy path: ${LEGACY_DB_PATH} -> ${DB_PATH}`);
+        return;
+      } catch (error) {
+        console.error("[softale-backend] failed to migrate legacy db", error);
+      }
+    }
     const restored = restoreDbFromLatestBackup("db_missing");
     if (restored) {
       return;
@@ -337,7 +361,7 @@ const uploadAvatar = multer({
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, at: nowIso() });
+  res.json({ ok: true, at: nowIso(), dataDir: DATA_DIR, dbPath: DB_PATH });
 });
 
 app.post("/v1/auth/register", (req, res) => {
