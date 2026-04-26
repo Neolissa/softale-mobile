@@ -5256,6 +5256,11 @@ export default function App() {
       } catch (error) {
         const message = error instanceof Error ? error.message : "Не удалось загрузить серверные метрики.";
         setServerMetricsError(message);
+        // В server-режиме не показываем локальный fallback-список пользователей,
+        // иначе админ видит "фантомных" юзеров, которых нет в backend БД.
+        setAnalyticsSnapshot({});
+        setAdminUsers([]);
+        return;
       } finally {
         setIsServerMetricsLoading(false);
       }
@@ -7447,6 +7452,12 @@ export default function App() {
   };
   const hasStartedStoriesInCatalog = storyConfigs.some((story) => storyStatusById[story.id] !== "not_started");
   const normalizedMapSearchQuery = mapSearchQuery.trim().toLowerCase();
+  const matchesCatalogSearch = (chunks: string[]) => {
+    if (!normalizedMapSearchQuery) return true;
+    const haystack = chunks.join(" ").toLowerCase();
+    const terms = normalizedMapSearchQuery.split(/\s+/).filter(Boolean);
+    return terms.every((term) => haystack.includes(term));
+  };
   const applyServerUserSnapshot = (email: string, role: UserRole, profileInput: unknown, walletInput?: EconomySnapshot) => {
     const profile = (profileInput && typeof profileInput === "object" ? profileInput : {}) as Partial<UserProfile>;
     const safeDisplayName = sanitizeShortText(profile.displayName, "Герой леса", 60);
@@ -8205,7 +8216,19 @@ export default function App() {
                   </View>
                 )}
               </View>
-              {!!activeCatalogTag && <Text style={styles.cardMeta}>Фильтр по тэгу: {activeCatalogTag}</Text>}
+              {!!activeCatalogTag && (
+                <View style={styles.catalogActiveTagRow}>
+                  <Text style={styles.cardMeta}>Фильтр по тэгу: {activeCatalogTag}</Text>
+                  <Pressable
+                    style={styles.catalogActiveTagClearButton}
+                    onPress={() => setActiveCatalogTag(null)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Сбросить фильтр по тэгу"
+                  >
+                    <Feather name="x" size={14} color={colors.textSecondary} />
+                  </Pressable>
+                </View>
+              )}
             </AppCard>
             <HeroBanner character={characterLibrary.foxGuide} accentEmoji={uiEmojiLibrary.challenge} title="Выбери курс или сюжет и начни игру" />
             <ScrollHint onPress={scrollToRecommendedCourse} />
@@ -8249,9 +8272,12 @@ export default function App() {
                   : mapCatalogTab === "all" || mapCatalogTab === "courses" || (mapCatalogTab === "recommended" && course.id === recommendedCourse.id);
               const shouldShowCourseByStatus = mapCatalogTab === "completed" ? isCourseCompleted : !isCourseCompleted && !isPinnedInProgressCourse;
               const shouldShowCourseByTag = !activeCatalogTag || courseTags.includes(activeCatalogTag);
-              const shouldShowCourseBySearch =
-                !normalizedMapSearchQuery ||
-                `${course.title} ${course.lore} ${course.focus}`.toLowerCase().includes(normalizedMapSearchQuery);
+              const shouldShowCourseBySearch = matchesCatalogSearch([
+                course.title,
+                course.lore,
+                course.focus,
+                ...courseTags,
+              ]);
               const shouldShowCourse = shouldShowCourseByTab && shouldShowCourseByStatus && shouldShowCourseByTag && shouldShowCourseBySearch;
               if (!shouldShowCourse) {
                 return null;
@@ -8362,8 +8388,7 @@ export default function App() {
                 const shouldShowStoryByStatus =
                   mapCatalogTab === "completed" ? storyStatusById[story.id] === "completed" : storyStatusById[story.id] !== "completed" && !isPinnedInProgressStory;
                 const shouldShowStoryByTag = !activeCatalogTag || storyTags.includes(activeCatalogTag);
-                const shouldShowStoryBySearch =
-                  !normalizedMapSearchQuery || `${story.label} ${story.description}`.toLowerCase().includes(normalizedMapSearchQuery);
+                const shouldShowStoryBySearch = matchesCatalogSearch([story.label, story.description, ...storyTags]);
                 const shouldShowStory = shouldShowStoryByTab && shouldShowStoryByStatus && shouldShowStoryByTag && shouldShowStoryBySearch;
                 if (!shouldShowStory) {
                   return null;
@@ -10189,6 +10214,21 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  catalogActiveTagRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  catalogActiveTagClearButton: {
+    width: 22,
+    height: 22,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
   },
