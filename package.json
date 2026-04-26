@@ -18,7 +18,10 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "web:build": "expo export --platform web --output-dir dist",
-    "web:preview": "npx serve dist"
+    "web:preview": "npx serve dist",
+    "content:audit": "node ./scripts/content-audit.js",
+    "prepush:check": "npm run content:audit && npm run web:build",
+    "prepare": "husky"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -34,6 +37,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "husky": "^9.1.7",
     "typescript": "~5.9.2"
   },
   "private": true

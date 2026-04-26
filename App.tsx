@@ -5443,6 +5443,10 @@ export default function App() {
   const soundPoolRef = useRef<Partial<Record<"tap" | "swipe" | "step_success" | "quest_finish_positive" | "quest_finish_negative", Audio.Sound>>>({});
   const soundCooldownRef = useRef<Record<string, number>>({});
   const mapScrollRef = useRef<ScrollView | null>(null);
+  useEffect(() => {
+    (globalThis as Record<string, unknown>).__SOFTALE_ACTIVE_TAB__ = activeTab;
+  }, [activeTab]);
+
   const mapSearchInputRef = useRef<TextInput | null>(null);
   useEffect(() => {
     if (!isMapCatalogVisible) {
@@ -5933,6 +5937,7 @@ export default function App() {
     setShuffledTokenBank([]);
     setSelectedBuilderIndices([]);
     const optionCount = activeForestStep?.options?.length ?? 0;
+    // UI-random: перемешиваем только визуальный порядок, логика остается по sourceIndex.
     setDisplayOptionOrder(optionCount > 0 ? shuffleIndices(optionCount) : []);
   }, [activeForestStep]);
 
@@ -6384,12 +6389,9 @@ export default function App() {
     setBuilderMismatchIndices([]);
     setStepErrorCount(0);
     closeQuestHintBubble();
-    const optionCount = activeForestStep?.options?.length ?? 0;
-    if (activeForestStep?.type !== "builder" && optionCount > 0) {
-      setDisplayOptionOrder(shuffleIndices(optionCount));
-    } else {
-      setDisplayOptionOrder([]);
-    }
+    // Порядок для следующего шага выставится в useEffect по activeForestStep.
+    // Здесь сбрасываем, чтобы не перетаскивать порядок предыдущего вопроса.
+    setDisplayOptionOrder([]);
   };
   const resetStageAnalytics = () => {
     setStageTacticUsage({
@@ -7990,15 +7992,20 @@ export default function App() {
       ravenclaw_common_room: "Аргументация",
       hufflepuff_common_room: "Бережность",
     };
-    return [genreTag[story.id], "Сюжет"];
+    const primaryTag = genreTag[story.id] ?? "Сюжет";
+    return [primaryTag, "Сюжет"];
   };
   const catalogTags = useMemo(() => {
     const tagSet = new Set<string>();
     courses.forEach((course) => {
-      getCourseTags(course).forEach((tag) => tagSet.add(tag));
+      getCourseTags(course)
+        .filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+        .forEach((tag) => tagSet.add(tag.trim()));
     });
     storyConfigs.forEach((story) => {
-      getStoryTags(story).forEach((tag) => tagSet.add(tag));
+      getStoryTags(story)
+        .filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+        .forEach((tag) => tagSet.add(tag.trim()));
     });
     return Array.from(tagSet).sort((a, b) => a.localeCompare(b, "ru"));
   }, [courses, storyConfigs]);
