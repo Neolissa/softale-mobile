@@ -5113,7 +5113,20 @@ const defaultCharacterGenderByCampaign: Record<CampaignId, CharacterGender> = {
 function applyGenderMorphology(text: string, gender: CharacterGender) {
   const normalizedGender: CharacterGender = gender === "neutral" ? "male" : gender;
 
-  const femaleSpecific = text
+  // Authoring format:
+  // - masculine base outside brackets + feminine suffix in brackets: "сделал(а)"
+  // - explicit pair: "готов (готова)"
+  // - no brackets -> neutral text (unchanged for both genders)
+  const applyExplicitBracketVariants = (source: string, targetGender: CharacterGender) => {
+    const inline = source.replace(/([А-Яа-яЁё-]+)\(([^)]+)\)/g, (_, base: string, femalePart: string) => {
+      return targetGender === "female" ? `${base}${femalePart}` : base;
+    });
+    return inline.replace(/([А-Яа-яЁё-]+)\s*\(\s*([А-Яа-яЁё-]+)\s*\)/g, (_, maleWord: string, femaleWord: string) => {
+      return targetGender === "female" ? femaleWord : maleWord;
+    });
+  };
+
+  const femaleSpecific = applyExplicitBracketVariants(text, "female")
     .replace(/Партнер\(ша\)/g, "Партнерша")
     .replace(/партнер\(ша\)/g, "партнерша")
     .replace(/согласен\(на\)/g, "согласна")
@@ -5127,7 +5140,7 @@ function applyGenderMorphology(text: string, gender: CharacterGender) {
     return femaleSpecific;
   }
 
-  return text
+  return applyExplicitBracketVariants(text, "male")
     .replace(/Партнер\(ша\)/g, "Партнер")
     .replace(/партнер\(ша\)/g, "партнер")
     .replace(/согласен\(на\)/g, "согласен")
@@ -5142,6 +5155,19 @@ function applyGenderMorphology(text: string, gender: CharacterGender) {
     .replace(/\bя погорячилась\b/g, "я погорячился")
     .replace(/\bЯ виновата\b/g, "Я виноват")
     .replace(/\bя виновата\b/g, "я виноват");
+}
+
+function resolvePlayerGenderForCampaign(profileGender: ProfileGender, campaign: CampaignId): ProfileGender {
+  // Business exceptions requested by product/editorial policy:
+  // - Always female POV in Cinderella and Narcissist
+  // - Always male/neutral POV in Sherlock and Train (Machinist)
+  if (campaign === "cinderella-advocate" || campaign === "narcissist") {
+    return "female";
+  }
+  if (campaign === "sherlock-gaslighter" || campaign === "stop-crane-train-18plus") {
+    return "male";
+  }
+  return profileGender;
 }
 
 function inferCharacterGenderBySpeaker(rawSpeaker: string | undefined, campaign: CampaignId): CharacterGender {
@@ -5644,17 +5670,18 @@ export default function App() {
     activeForestStep?.opponentName ?? opponentNameByCampaign[activeCampaignId],
     activeCampaignId
   );
-  const visibleStepSceneByNpcGender = applyGenderToNpcReplica(visibleStepScene ?? "", activeNpcGender);
-  const visibleStepDispositionByNpcGender = applyGenderToNpcReplica(
-    activeForestStep?.dispositionText ?? visibleStepScene ?? activeForestStep?.scene ?? "",
-    activeNpcGender
+  const effectivePlayerGender = resolvePlayerGenderForCampaign(profileGender, activeCampaignId);
+  const adaptQuestReplica = (rawText: string) =>
+    applyGenderToPlayerReplica(applyGenderToNpcReplica(rawText, activeNpcGender), effectivePlayerGender);
+  const visibleStepSceneByNpcGender = adaptQuestReplica(visibleStepScene ?? "");
+  const visibleStepDispositionByNpcGender = adaptQuestReplica(
+    activeForestStep?.dispositionText ?? visibleStepScene ?? activeForestStep?.scene ?? ""
   );
-  const visibleStepSpeechByNpcGender = applyGenderToNpcReplica(
-    activeForestStep?.opponentSpeech ?? visibleStepScene ?? activeForestStep?.scene ?? "",
-    activeNpcGender
+  const visibleStepSpeechByNpcGender = adaptQuestReplica(
+    activeForestStep?.opponentSpeech ?? visibleStepScene ?? activeForestStep?.scene ?? ""
   );
-  const visibleStepInstructionByPlayerGender = applyGenderToPlayerReplica(activeForestStep?.instruction ?? "", profileGender);
-  const visibleStepHintByPlayerGender = applyGenderToPlayerReplica(activeForestStep?.hint ?? "", profileGender);
+  const visibleStepInstructionByPlayerGender = applyGenderToPlayerReplica(activeForestStep?.instruction ?? "", effectivePlayerGender);
+  const visibleStepHintByPlayerGender = applyGenderToPlayerReplica(activeForestStep?.hint ?? "", effectivePlayerGender);
   const visibleStepOptions = useMemo(() => {
     const sourceOptions = activeForestStep?.options ?? [];
     if (!sourceOptions.length) {
@@ -5670,12 +5697,12 @@ export default function App() {
     [selectedBuilderIndices, shuffledTokenBank]
   );
   const visibleBuilderTokens = useMemo(
-    () => builderTokens.map((token) => applyGenderToPlayerReplica(token, profileGender)),
-    [builderTokens, profileGender]
+    () => builderTokens.map((token) => applyGenderToPlayerReplica(token, effectivePlayerGender)),
+    [builderTokens, effectivePlayerGender]
   );
   const visibleShuffledTokenBank = useMemo(
-    () => shuffledTokenBank.map((token) => applyGenderToPlayerReplica(token, profileGender)),
-    [profileGender, shuffledTokenBank]
+    () => shuffledTokenBank.map((token) => applyGenderToPlayerReplica(token, effectivePlayerGender)),
+    [effectivePlayerGender, shuffledTokenBank]
   );
   const sfxSource = useMemo(
     () => ({
@@ -7196,7 +7223,10 @@ export default function App() {
       }
 
       const selectedSourceIndex = resolveSourceOptionIndex(selectedSingle);
-      const npcReaction = applyGenderToPlayerReplica(activeForestStep.optionNpcReactionByIndex?.[selectedSourceIndex] ?? "", profileGender) || undefined;
+      const npcReaction = applyGenderToPlayerReplica(
+        activeForestStep.optionNpcReactionByIndex?.[selectedSourceIndex] ?? "",
+        effectivePlayerGender
+      ) || undefined;
       const selectedTactic = activeForestStep.branchEffects?.[selectedSourceIndex] ?? inferTacticByOptionIndex(selectedSourceIndex);
 
       const branch = selectedTactic;
@@ -9563,7 +9593,7 @@ export default function App() {
                           setSelectedSingle(idx);
                         }}
                       >
-                        <Text style={styles.optionText}>{applyGenderToPlayerReplica(option, profileGender)}</Text>
+                        <Text style={styles.optionText}>{applyGenderToPlayerReplica(option, effectivePlayerGender)}</Text>
                       </Pressable>
                     );
                   })}
