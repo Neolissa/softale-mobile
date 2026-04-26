@@ -3540,8 +3540,8 @@ const campaignRhythmProfile: Record<CampaignId, number[]> = {
   romance: [4, 5, 6, 5, 5],
   slytherin: [6, 5, 5, 4, 5],
   boss: [5, 5, 4, 6, 5],
-  narcissist: [4, 4, 7, 5, 5],
-  "sherlock-gaslighter": [4, 4, 4, 5, 5, 6, 7],
+  narcissist: [5, 5, 5, 5, 5, 5, 5],
+  "sherlock-gaslighter": [5, 5, 5, 5, 5, 5, 5],
   "cinderella-advocate": [4, 5, 6, 5, 5],
   "healer-empathy": [5, 4, 5, 6, 5],
   "partisan-hq": [5, 6, 5, 5, 4],
@@ -3879,7 +3879,7 @@ function buildLitRpgStepOptions(campaign: CampaignId, node: QuestNarrativeNode, 
 
 function buildDecisionPrompt(campaign: CampaignId, stageIdx: number, idx: number) {
   const pools = decisionPromptByCampaign[campaign];
-  const safeStage = Math.max(0, Math.min(4, stageIdx));
+  const safeStage = Math.max(0, Math.min(pools.length - 1, stageIdx));
   const stagePool = pools[safeStage];
   return stagePool[idx % stagePool.length];
 }
