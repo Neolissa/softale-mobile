@@ -5010,6 +5010,7 @@ export default function App() {
   const stageStartedAtRef = useRef<number | null>(null);
   const activeTabRef = useRef<Tab>("map");
   const reactivationCheckDoneForRef = useRef<string | null>(null);
+  const skipNextServerProfileSyncRef = useRef(false);
   const authBackendMode = authApi.getMode();
   const isServerAuth = authBackendMode === "server";
 
@@ -5713,6 +5714,10 @@ export default function App() {
       }
 
       if (isServerAuth) {
+        if (skipNextServerProfileSyncRef.current) {
+          skipNextServerProfileSyncRef.current = false;
+          return;
+        }
         try {
           const token = await AsyncStorage.getItem(authApi.storageKey);
           if (!token) {
@@ -7482,6 +7487,7 @@ export default function App() {
     return terms.every((term) => haystack.includes(term));
   };
   const applyServerUserSnapshot = (email: string, role: UserRole, profileInput: unknown, walletInput?: EconomySnapshot) => {
+    skipNextServerProfileSyncRef.current = true;
     const profile = (profileInput && typeof profileInput === "object" ? profileInput : {}) as Partial<UserProfile>;
     const safeDisplayName = sanitizeShortText(profile.displayName, "Герой леса", 60);
     const safePrimaryStyle = sanitizeConflictStyle(profile.conflictPrimaryStyle);
