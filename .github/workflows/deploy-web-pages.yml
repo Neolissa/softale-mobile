@@ -32,12 +32,18 @@ jobs:
         run: npm ci
 
       - name: Export Expo web build
+        env:
+          EXPO_PUBLIC_AUTH_MODE: server
+          EXPO_PUBLIC_ECONOMY_MODE: server
+          EXPO_PUBLIC_ECONOMY_API_BASE_URL: https://softale-mobile.onrender.com
         run: npm run web:build
 
       - name: Rewrite asset paths for GitHub Pages subpath
         run: |
-          sed -i 's|href="/|href="./|g' dist/index.html
-          sed -i 's|src="/|src="./|g' dist/index.html
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          sed -i "s|href=\"/|href=\"/${REPO_NAME}/|g" dist/index.html
+          sed -i "s|src=\"/|src=\"/${REPO_NAME}/|g" dist/index.html
+          find dist/_expo/static/js/web -type f -name "index-*.js" -exec sed -i "s|\"/assets/|\"/${REPO_NAME}/assets/|g" {} +
 
       - name: Add SPA fallback page
         run: cp dist/index.html dist/404.html

@@ -5670,6 +5670,8 @@ export default function App() {
             profileSetupDone,
             aboutMe,
             friendEmails,
+            xp,
+            energy,
             completedCount,
             lastFeedback,
             selectedQuestId,

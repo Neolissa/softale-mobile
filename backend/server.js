@@ -262,6 +262,15 @@ app.post("/v1/economy/profile/sync", (req, res) => {
   if (!incoming || typeof incoming !== "object") {
     return res.status(400).json({ error: "Invalid profile payload" });
   }
+  const incomingXp = Number(incoming.xp);
+  const incomingEnergy = Number(incoming.energy);
+  if (Number.isFinite(incomingXp) && incomingXp >= 0) {
+    user.wallet.xp = Math.round(incomingXp);
+  }
+  if (Number.isFinite(incomingEnergy) && incomingEnergy >= 0) {
+    user.wallet.energy = Math.round(incomingEnergy);
+  }
+
   user.profile = {
     ...user.profile,
     ...incoming,
