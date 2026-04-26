@@ -3504,7 +3504,10 @@ function buildCampaignNpcReactionPreset(
 }
 
 function buildLitRpgStepOptions(campaign: CampaignId, node: QuestNarrativeNode, idx: number, stageIdx: number) {
-  const editorialStep = editorialStepOptionsByCampaign[campaign]?.[idx];
+  const campaignNodesCount = getCampaignNodes(campaign).length;
+  const editorialSteps = editorialStepOptionsByCampaign[campaign];
+  const hasFullEditorialCoverage = (editorialSteps?.length ?? 0) === campaignNodesCount;
+  const editorialStep = hasFullEditorialCoverage ? editorialSteps?.[idx] : undefined;
   if (editorialStep) {
     const options = editorialStep.options.map((line) => toShortPlayerLine(line)) as [string, string, string, string, string];
     const correctSingle = Math.max(0, Math.min(options.length - 1, editorialStep.correctSingle));
@@ -3790,10 +3793,11 @@ function buildLitRpgCampaign(campaign: CampaignId, questions: QuestDifficulty): 
   const lore = campaignLore[campaign];
   const allNodes = getCampaignNodes(campaign);
   const editorialStepCount = editorialStepOptionsByCampaign[campaign]?.length ?? 0;
-  const nodes = editorialStepCount > 0 ? allNodes.slice(0, editorialStepCount) : allNodes;
+  const hasFullEditorialCoverage = editorialStepCount === allNodes.length;
+  const nodes = allNodes;
   const localUsedOptionKeys = new Set<string>();
   let previousStepOptionKeys = new Set<string>();
-  const editorialLockedCampaign = (editorialStepOptionsByCampaign[campaign]?.length ?? 0) > 0;
+  const editorialLockedCampaign = hasFullEditorialCoverage;
   const steps = nodes.map((node, idx) => {
     const stageIdx = getStageIdxByRhythm(campaign, idx, nodes.length);
     const { options, correctSingle, branchEffects, optionNpcReactionByIndex } = buildLitRpgStepOptions(campaign, node, idx, stageIdx);
