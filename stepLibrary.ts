@@ -222,8 +222,8 @@ function flattenSituations(seed: LongCampaignSeed, stages: number, tps: number):
     const row =
       seed.stageSituationsByStage?.[s] ?? DEFAULT_STAGE_SITUATIONS[s % DEFAULT_STAGE_SITUATIONS.length];
     for (let t = 0; t < tps; t += 1) {
-      // Сохраняем исторический порядок long-рантайма: внутри этапа сдвиг по stageIdx.
-      out.push(row[(t + s) % row.length] ?? row[0]);
+      // Строгое выравнивание: scene/реплика/вопрос/опции должны жить на одном индексe шага.
+      out.push(row[t % row.length] ?? row[0]);
     }
   }
   return out;
@@ -235,8 +235,8 @@ function flattenInstructions(seed: LongCampaignSeed, scenes: string[], stages: n
     const row =
       seed.decisionPromptTemplatesByStage?.[s] ?? DEFAULT_DECISION_PROMPTS[s % DEFAULT_DECISION_PROMPTS.length];
     for (let t = 0; t < tps; t += 1) {
-      // Сохраняем исторический порядок long-рантайма: шаблон вопроса с шагом *2 + stageIdx.
-      const base = row[(t * 2 + s) % row.length] ?? row[0];
+      // Вопрос должен соответствовать той же позиции внутри этапа, что и сцена.
+      const base = row[t % row.length] ?? row[0];
       const i = s * tps + t;
       const lead = scenes[i]?.split(/[.!?]/)[0]?.trim() ?? "";
       out.push(lead.length > 14 ? `${base} (опираясь на ситуацию: ${lead})` : base);
