@@ -4696,13 +4696,15 @@ export default function App() {
     architect: 0,
   });
   const [answerBucketUsage, setAnswerBucketUsage] = useState<[number, number, number, number, number]>([0, 0, 0, 0, 0]);
-  const [stageTacticUsage, setStageTacticUsage] = useState<Record<BranchId, number>>({
+  const createEmptyStageTacticUsage = (): Record<BranchId, number> => ({
     strategist: 0,
     empath: 0,
     boundary: 0,
     challenger: 0,
     architect: 0,
   });
+  const [stageTacticUsage, setStageTacticUsage] = useState<Record<BranchId, number>>(() => createEmptyStageTacticUsage());
+  const stageTacticUsageRef = useRef<Record<BranchId, number>>(createEmptyStageTacticUsage());
   const [stageForgivenErrorByType, setStageForgivenErrorByType] = useState<Record<string, number>>({});
   const [stageProgressSummary, setStageProgressSummary] = useState<StageProgressSummary | null>(null);
   const [questFinalSummary, setQuestFinalSummary] = useState<QuestFinalSummary | null>(null);
@@ -5799,20 +5801,17 @@ export default function App() {
     setDisplayOptionOrder([]);
   };
   const resetStageAnalytics = () => {
-    setStageTacticUsage({
-      strategist: 0,
-      empath: 0,
-      boundary: 0,
-      challenger: 0,
-      architect: 0,
-    });
+    const resetUsage = createEmptyStageTacticUsage();
+    stageTacticUsageRef.current = resetUsage;
+    setStageTacticUsage(resetUsage);
     setStageForgivenErrorByType({});
   };
 
   const buildStageSummary = (stageIdx: number, durationSec: number) => {
-    const totalAnswers = Object.values(stageTacticUsage).reduce((acc, value) => acc + value, 0);
+    const stageTacticUsageSnapshot = { ...stageTacticUsageRef.current };
+    const totalAnswers = Object.values(stageTacticUsageSnapshot).reduce((acc, value) => acc + value, 0);
     const forgivenErrors = Object.values(stageForgivenErrorByType).reduce((acc, value) => acc + value, 0);
-    const topBranch = buildBranchScaleData(stageTacticUsage).sort((a, b) => b.value - a.value)[0];
+    const topBranch = buildBranchScaleData(stageTacticUsageSnapshot).sort((a, b) => b.value - a.value)[0];
     const topTacticName = topBranch ? branchScaleUi[topBranch.branch].label : "смешанный стиль";
     const conflictTrend =
       forgivenErrors === 0
@@ -5824,15 +5823,16 @@ export default function App() {
       stageIdx,
       durationSec,
       forgivenErrorByType: stageForgivenErrorByType,
-      tacticUsage: stageTacticUsage,
+      tacticUsage: stageTacticUsageSnapshot,
       narrative: `${conflictTrend} Ведущий подход этапа: ${topTacticName}.`,
     });
     resetStageAnalytics();
   };
   const stageAnalyticsSuffix = () => {
     const forgivenTotal = Object.values(stageForgivenErrorByType).reduce((acc, value) => acc + value, 0);
-    const tacticTotal = Object.values(stageTacticUsage).reduce((acc, value) => acc + value, 0);
-    const topTactic = buildBranchScaleData(stageTacticUsage).sort((a, b) => b.value - a.value)[0];
+    const stageTacticUsageSnapshot = stageTacticUsageRef.current;
+    const tacticTotal = Object.values(stageTacticUsageSnapshot).reduce((acc, value) => acc + value, 0);
+    const topTactic = buildBranchScaleData(stageTacticUsageSnapshot).sort((a, b) => b.value - a.value)[0];
     return `forgiven_total:${forgivenTotal};tactic_answers:${tacticTotal};top_tactic:${topTactic?.branch ?? "n/a"};top_tactic_pct:${topTactic?.percent ?? 0}`;
   };
 
@@ -6493,7 +6493,12 @@ export default function App() {
 
       const branch = selectedTactic;
       setBranchScore((prev) => ({ ...prev, [branch]: prev[branch] + 1 }));
-      setStageTacticUsage((prev) => ({ ...prev, [branch]: prev[branch] + 1 }));
+      const nextStageTacticUsage = {
+        ...stageTacticUsageRef.current,
+        [branch]: (stageTacticUsageRef.current[branch] ?? 0) + 1,
+      };
+      stageTacticUsageRef.current = nextStageTacticUsage;
+      setStageTacticUsage(nextStageTacticUsage);
       trackAnalyticsEvent("branch_shift", {
         details: `${activeCampaignId}:${branch}`,
         stepIndex: forestStepIndex,
