@@ -4779,6 +4779,7 @@ export default function App() {
   const reactivationCheckDoneForRef = useRef<string | null>(null);
   const skipNextServerProfileSyncRef = useRef(false);
   const runtimeProgressHydratedForRef = useRef<string | null>(null);
+  const runtimeProgressReadyForPersistRef = useRef<string | null>(null);
   const authBackendMode = authApi.getMode();
   const isServerAuth = authBackendMode === "server";
 
@@ -5259,6 +5260,9 @@ export default function App() {
       if (!currentUserEmail || !isProfileHydrated) {
         return;
       }
+      if (runtimeProgressReadyForPersistRef.current !== currentUserEmail) {
+        return;
+      }
       const snapshot: RuntimeQuestProgressSnapshot = {
         activeProgramMode,
         selectedStory,
@@ -5293,7 +5297,9 @@ export default function App() {
       if (!currentUserEmail || !isProfileHydrated) {
         return;
       }
+      runtimeProgressReadyForPersistRef.current = null;
       if (runtimeProgressHydratedForRef.current === currentUserEmail) {
+        runtimeProgressReadyForPersistRef.current = currentUserEmail;
         return;
       }
       runtimeProgressHydratedForRef.current = currentUserEmail;
@@ -5329,6 +5335,8 @@ export default function App() {
         }
       } catch {
         // Ignore broken snapshot and continue with profile defaults.
+      } finally {
+        runtimeProgressReadyForPersistRef.current = currentUserEmail;
       }
     };
     hydrateRuntimeQuestProgress();
@@ -7144,6 +7152,8 @@ export default function App() {
       }
     } finally {
       sessionStartedAtRef.current = null;
+      runtimeProgressHydratedForRef.current = null;
+      runtimeProgressReadyForPersistRef.current = null;
       setCurrentUserEmail(null);
       setCurrentUserRole("USER");
       setIsProfileHydrated(false);
