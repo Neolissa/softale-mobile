@@ -3,9 +3,9 @@
  * сцена, оппонент, реплика, вопрос (instruction), подсказка и пять вариантов
  * всегда согласованы по одному индексу шага.
  */
-import { editorialStepOptionsByCampaign } from "./scenarioBible";
+import { editorialStepOptionsByCampaign, manualInstructionByCampaign } from "./scenarioBible";
 import type { ScenarioCampaignId } from "./scenarioBible";
-import { reactionPoolsByCampaign } from "./reactionPoolsByCampaign";
+import { reactionOverridesByCampaignStep, reactionPoolsByCampaign } from "./reactionPoolsByCampaign";
 import {
   longCampaignSeeds,
   questContentByCampaign,
@@ -153,6 +153,10 @@ export function resolveNpcReactionLine(
   branch: BranchId,
   opponentName: string
 ): string {
+  const overrideLine = reactionOverridesByCampaignStep[campaign as CampaignContentId]?.[globalStepIdx]?.[optionIdx];
+  if (overrideLine) {
+    return overrideLine;
+  }
   const pool = reactionPoolsByCampaign[campaign as CampaignContentId]?.[branch];
   if (!pool?.length) {
     throw new Error(`[stepLibrary] Нет пула реакций для кампании "${campaign}" и ветки "${branch}"`);
@@ -218,7 +222,8 @@ function flattenSituations(seed: LongCampaignSeed, stages: number, tps: number):
     const row =
       seed.stageSituationsByStage?.[s] ?? DEFAULT_STAGE_SITUATIONS[s % DEFAULT_STAGE_SITUATIONS.length];
     for (let t = 0; t < tps; t += 1) {
-      out.push(row[t % row.length] ?? row[0]);
+      // Сохраняем исторический порядок long-рантайма: внутри этапа сдвиг по stageIdx.
+      out.push(row[(t + s) % row.length] ?? row[0]);
     }
   }
   return out;
@@ -230,7 +235,8 @@ function flattenInstructions(seed: LongCampaignSeed, scenes: string[], stages: n
     const row =
       seed.decisionPromptTemplatesByStage?.[s] ?? DEFAULT_DECISION_PROMPTS[s % DEFAULT_DECISION_PROMPTS.length];
     for (let t = 0; t < tps; t += 1) {
-      const base = row[t % row.length] ?? row[0];
+      // Сохраняем исторический порядок long-рантайма: шаблон вопроса с шагом *2 + stageIdx.
+      const base = row[(t * 2 + s) % row.length] ?? row[0];
       const i = s * tps + t;
       const lead = scenes[i]?.split(/[.!?]/)[0]?.trim() ?? "";
       out.push(lead.length > 14 ? `${base} (опираясь на ситуацию: ${lead})` : base);
@@ -239,11 +245,26 @@ function flattenInstructions(seed: LongCampaignSeed, scenes: string[], stages: n
   return out;
 }
 
+function assertUniqueQuestions(campaign: string, questions: string[]) {
+  const seen = new Set<string>();
+  for (let i = 0; i < questions.length; i += 1) {
+    const normalized = questions[i].replace(/\s+/g, " ").trim().toLowerCase();
+    if (!normalized) {
+      throw new Error(`[stepLibrary] Пустой вопрос в кампании "${campaign}" шаг ${i + 1}`);
+    }
+    if (seen.has(normalized)) {
+      throw new Error(`[stepLibrary] Повтор вопроса в кампании "${campaign}" на шаге ${i + 1}: "${questions[i]}"`);
+    }
+    seen.add(normalized);
+  }
+}
+
 function flattenOpponentLines(seed: LongCampaignSeed, scenes: string[], stages: number, tps: number): string[] {
   const out: string[] = [];
   const total = stages * tps;
   const recentWindow = Math.min(8, Math.max(1, Math.floor(seed.toxicLines.length / 3)));
   const recent: string[] = [];
+  const usedFullLines = new Set<string>();
   for (let i = 0; i < total; i += 1) {
     const s = Math.floor(i / tps);
     const name = seed.opponents[s % seed.opponents.length];
@@ -259,11 +280,24 @@ function flattenOpponentLines(seed: LongCampaignSeed, scenes: string[], stages: 
         }
       }
     }
+    // Не повторяем точную реплику (имя+эмоция+текст) внутри одной кампании, если есть альтернатива в пуле.
+    const compose = (candidate: string) => `${name} ${emo}: «${candidate}»`;
+    if (usedFullLines.has(compose(line))) {
+      for (let shift = 1; shift < seed.toxicLines.length; shift += 1) {
+        const candidate = seed.toxicLines[(baseIdx + shift) % seed.toxicLines.length];
+        if (!usedFullLines.has(compose(candidate))) {
+          line = candidate;
+          break;
+        }
+      }
+    }
     recent.push(line);
     if (recent.length > recentWindow) {
       recent.shift();
     }
-    out.push(`${name} ${emo}: «${line}»`);
+    const fullLine = `${name} ${emo}: «${line}»`;
+    usedFullLines.add(fullLine);
+    out.push(fullLine);
   }
   return out;
 }
@@ -277,7 +311,14 @@ function buildFromLongSeed(seed: LongCampaignSeed): StepLibraryEntry[] {
     throw new Error(`[stepLibrary] Кампания "${seed.id}": в сценарной библиотеке ${editorial.length} наборов опций, нужно ${total}`);
   }
   const scenes = flattenSituations(seed, stages, tps);
-  const instructions = flattenInstructions(seed, scenes, stages, tps);
+  const manual = manualInstructionByCampaign[seed.id as ScenarioCampaignId];
+  const instructions = manual?.length
+    ? manual.map((q) => q.trim())
+    : flattenInstructions(seed, scenes, stages, tps);
+  if (manual?.length && manual.length !== total) {
+    throw new Error(`[stepLibrary] Кампания "${seed.id}": manualInstructionByCampaign содержит ${manual.length} вопросов, нужно ${total}`);
+  }
+  assertUniqueQuestions(seed.id, instructions);
   const opponentLines = flattenOpponentLines(seed, scenes, stages, tps);
   const out: StepLibraryEntry[] = [];
   for (let i = 0; i < total; i += 1) {

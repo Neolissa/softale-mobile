@@ -20,6 +20,8 @@
     "web:build": "expo export --platform web --output-dir dist",
     "web:preview": "npx serve dist",
     "content:audit": "node ./scripts/content-audit.js",
+    "content:duplicates": "tsx ./scripts/content-duplicates-report.ts",
+    "content:scene-dialogue": "tsx ./scripts/content-scene-dialogue-duplicates-report.ts",
     "build:npc-reactions": "tsx ./scripts/build-npc-reactions.ts",
     "prepush:check": "npm run content:audit && npm run web:build",
     "prepare": "husky"
