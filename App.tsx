@@ -4170,7 +4170,9 @@ const adultOnlyStories: QuestStory[] = ["narcissist", "stop-crane-train-18plus",
 
 function buildForestQuestByDifficulty(questions: QuestDifficulty, story: QuestStory): ForestStep[] {
   try {
-    return buildLitRpgCampaign(story, questions).map((template) => ({
+    const storyDifficultyPolicy = storyConfigs.find((item) => item.id === story)?.difficulties ?? [questions];
+    const normalizedQuestions = (storyDifficultyPolicy.includes(questions) ? questions : storyDifficultyPolicy[0]) as QuestDifficulty;
+    return buildLitRpgCampaign(story, normalizedQuestions).map((template) => ({
       ...template,
     }));
   } catch (error) {
@@ -7018,10 +7020,12 @@ export default function App() {
       }
 
       const selectedSourceIndex = resolveSourceOptionIndex(selectedSingle);
-      const npcReaction = applyGenderToPlayerReplica(
-        activeForestStep.optionNpcReactionByIndex?.[selectedSourceIndex] ?? "",
-        effectivePlayerGender
-      ) || undefined;
+      const npcReactionSource =
+        activeForestStep.optionNpcReactionByIndex?.[selectedSourceIndex] ??
+        activeForestStep.opponentSpeech ??
+        activeForestStep.dispositionText ??
+        "";
+      const npcReaction = applyGenderToPlayerReplica(npcReactionSource, effectivePlayerGender) || undefined;
       const selectedTactic = activeForestStep.branchEffects?.[selectedSourceIndex] ?? inferTacticByOptionIndex(selectedSourceIndex);
 
       const branch = selectedTactic;
