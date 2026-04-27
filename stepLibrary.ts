@@ -242,11 +242,27 @@ function flattenInstructions(seed: LongCampaignSeed, scenes: string[], stages: n
 function flattenOpponentLines(seed: LongCampaignSeed, scenes: string[], stages: number, tps: number): string[] {
   const out: string[] = [];
   const total = stages * tps;
+  const recentWindow = Math.min(8, Math.max(1, Math.floor(seed.toxicLines.length / 3)));
+  const recent: string[] = [];
   for (let i = 0; i < total; i += 1) {
     const s = Math.floor(i / tps);
     const name = seed.opponents[s % seed.opponents.length];
     const emo = seed.emotions[s % seed.emotions.length];
-    const line = seed.toxicLines[i % seed.toxicLines.length];
+    const baseIdx = (i * 3 + s) % seed.toxicLines.length;
+    let line = seed.toxicLines[baseIdx];
+    if (recent.includes(line)) {
+      for (let shift = 1; shift < seed.toxicLines.length; shift += 1) {
+        const candidate = seed.toxicLines[(baseIdx + shift) % seed.toxicLines.length];
+        if (!recent.includes(candidate)) {
+          line = candidate;
+          break;
+        }
+      }
+    }
+    recent.push(line);
+    if (recent.length > recentWindow) {
+      recent.shift();
+    }
     out.push(`${name} ${emo}: «${line}»`);
   }
   return out;
