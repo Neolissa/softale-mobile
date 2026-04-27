@@ -2714,10 +2714,10 @@ const tacticalLinePool = {
 };
 
 const endingNarrativeByRoute = (campaign: CampaignId): Record<EndingRouteId, string> => ({
-  order: `Концовка «${endingRouteName.order}»: в кампании «${campaignLore[campaign].title}» ты собираешь хаос в работающую систему, и конфликт начинает служить результату.`,
-  harmony: `Концовка «${endingRouteName.harmony}»: в кампании «${campaignLore[campaign].title}» ты гасишь эскалацию, сохраняешь контакт и возвращаешь диалог в живой, безопасный ритм.`,
-  boundary: `Концовка «${endingRouteName.boundary}»: в кампании «${campaignLore[campaign].title}» ты удерживаешь уважение к себе и показываешь, что мягкая твердость работает даже под давлением.`,
-  breakthrough: `Концовка «${endingRouteName.breakthrough}»: в кампании «${campaignLore[campaign].title}» ты останавливаешь токсичный сценарий и разворачиваешь игру в свою пользу без разрушения себя.`,
+  order: `В кампании «${campaignLore[campaign].title}» ты собираешь хаос в работающую систему, и конфликт начинает служить результату.`,
+  harmony: `В кампании «${campaignLore[campaign].title}» ты гасишь эскалацию, сохраняешь контакт и возвращаешь диалог в живой, безопасный ритм.`,
+  boundary: `В кампании «${campaignLore[campaign].title}» ты удерживаешь уважение к себе и показываешь, что мягкая твердость работает даже под давлением.`,
+  breakthrough: `В кампании «${campaignLore[campaign].title}» ты останавливаешь токсичный сценарий и разворачиваешь игру в свою пользу без разрушения себя.`,
 });
 
 type EndingPerformanceTier = "angel" | "good" | "normal" | "bad" | "harsh";
@@ -2743,45 +2743,53 @@ function detectEndingPerformanceTier(totalSteps: number, penalties: number, firs
 function buildFinalStoryByOutcome(
   campaign: CampaignId,
   route: EndingRouteId,
+  dominantBranch: BranchId,
   tier: EndingPerformanceTier,
   penalties: number,
+  xpEarned: number,
   overrideStory?: string
 ) {
+  const tacticTextByBranch: Record<BranchId, string> = {
+    strategist: "тактика Стратега: опора на проверяемые факты, хронологию и ясную структуру решений.",
+    empath: "тактика Эмпата: удержание контакта, деэскалация и бережная работа с напряжением без потери сути.",
+    boundary: "тактика Границ: спокойная твердость, отказ от давления и защита рамки диалога.",
+    challenger: "тактика Прорыва: прямое называние манипуляций и перехват инициативы в критических узлах.",
+    architect: "тактика Архитектора: сборка устойчивых правил, ролей и процедур, которые переживают кризис.",
+  };
+  const xpLine = `Получено XP за кампанию: ${Math.max(0, xpEarned)}.`;
+  const tacticLine = `Выбранная тактика: ${tacticTextByBranch[dominantBranch]}`;
   if (overrideStory) {
-    return overrideStory;
+    return `${xpLine} ${tacticLine} ${overrideStory}`;
   }
   const campaignName = campaignLore[campaign].title;
+  if (campaign === "sherlock-gaslighter") {
+    const sherlockByTier: Record<EndingPerformanceTier, string> = {
+      angel: "Ты довела расследование до доказуемого финала: цепочка улик закрыта, манипуляции вскрыты, артефакт возвращен в фонд, а давление Доктора Лайтмана больше не работает.",
+      good: "Ты удержала дело в фактах и не дала увести его в театр эмоций. Главные эпизоды доказаны, но часть контуров пришлось закрывать на пределе времени и ресурса.",
+      normal: "Ты вышла к рабочему итогу, но не все уязвимости удалось закрыть. По делу есть результат, однако отдельные зоны останутся точкой риска для следующего раунда.",
+      bad: "В решающих сценах инициатива уходила к оппоненту: ты видела подмену, но не везде смогла закрепить доказательства процедурно. Доктор Лайтман уходит без приговора, артефакт потерян, а в деле остаются только версии и сомнения.",
+      harsh: "Эмоции и страх перехватили управление в ключевой момент. Ты уверена, что преступник был рядом, но доказательный контур развалился, артефакт утрачен, а финал расследования оказался трагически незавершенным.",
+    };
+    return `${xpLine} ${tacticLine} ${sherlockByTier[tier]}`;
+  }
   const editorialEnding = editorialEndingByCampaignTier[campaign]?.[tier];
   if (editorialEnding) {
-    const tierLabel: Record<EndingPerformanceTier, string> = {
-      angel: "ангел",
-      good: "хороший",
-      normal: "нормальный",
-      bad: "плохой",
-      harsh: "жесть",
-    };
-    return `Финал «${endingRouteName[route]}» — ${tierLabel[tier]}: ${editorialEnding}`;
+    return `${xpLine} ${tacticLine} ${editorialEnding}`;
   }
   const routeLine: Record<EndingRouteId, string> = {
-    order: "ты навела порядок в хаосе и вернула разговор к ясным договоренностям",
-    harmony: "ты сохранила контакт даже на высоком напряжении и не дала диалогу развалиться",
-    boundary: "ты удержала самоуважение и не позволила продавить себя через страх или стыд",
-    breakthrough: "ты развернула токсичный сценарий и перехватила инициативу без саморазрушения",
+    order: "В финале ты собираешь хаос в рабочую структуру и возвращаешь процесс в управляемый ритм.",
+    harmony: "В финале ты сохраняешь контакт под давлением и удерживаешь диалог живым и конструктивным.",
+    boundary: "В финале ты держишь самоуважение и не позволяешь продавить себя через страх, вину или стыд.",
+    breakthrough: "В финале ты называешь манипуляции прямо и разворачиваешь конфликт в сторону взрослого решения.",
   };
-  const endingTag = `Финал «${endingRouteName[route]}»`;
-  if (tier === "angel") {
-    return `${endingTag} — ангел: в кампании «${campaignName}» ${routeLine[route]}. Ты ведешь переговоры идеально: эскалация остановлена, последствия устойчиво положительные, а твой стиль становится новой нормой для всей команды.`;
-  }
-  if (tier === "good") {
-    return `${endingTag} — хороший: в кампании «${campaignName}» ${routeLine[route]}. В решающий момент тебя услышали, переговоры закончились рабочим соглашением, а последствия оказались устойчивыми: роли ясны, правила приняты, доверие выросло.`;
-  }
-  if (tier === "normal") {
-    return `${endingTag} — нормальный: в кампании «${campaignName}» ${routeLine[route]}, но местами не хватило точности. Итог переговоров рабочий, но хрупкий: конфликт снят частично, и команде нужен дополнительный раунд договоренностей.`;
-  }
-  if (tier === "bad") {
-    return `${endingTag} — плохой: в кампании «${campaignName}» ты несколько раз отдала инициативу, а штрафы подрезали темп. Переговоры закончились с потерями: контакт ослаб, договоренности шаткие, часть последствий перенеслась в следующий этап как новый конфликт.`;
-  }
-  return `${endingTag} — жесть: в кампании «${campaignName}» ты не удержала ритм под давлением — штрафов было ${penalties}, и оппоненты перехватили контроль ключевых эпизодов. Переговоры сорвались, последствия болезненные: разрыв, репутационный откат и необходимость собирать позицию заново.`;
+  const fallbackByTier: Record<EndingPerformanceTier, string> = {
+    angel: `В кампании «${campaignName}» ${routeLine[route]} Развязка устойчива: решение принято, последствия управляемы, новая норма закреплена.`,
+    good: `В кампании «${campaignName}» ${routeLine[route]} Ты удержала ключевой контур, и финал завершился рабочими договоренностями.`,
+    normal: `В кампании «${campaignName}» ${routeLine[route]} Итог рабочий, но хрупкий: часть узлов потребует дополнительного прохода.`,
+    bad: `В кампании «${campaignName}» ты несколько раз отдала инициативу, и цена финала выросла. Развязка частичная: формально эпизод закрыт, но конфликтный след остался.`,
+    harsh: `В кампании «${campaignName}» давление сорвало темп, и финал стал болезненным. Ты выходишь из арки с потерями и необходимостью собирать позицию заново.`,
+  };
+  return `${xpLine} ${tacticLine} ${fallbackByTier[tier]}`;
 }
 
 function resolveExtendedEndingForNarrativeCampaign(
@@ -6180,8 +6188,10 @@ export default function App() {
     const litRpgEnding = buildFinalStoryByOutcome(
       activeCampaignId,
       dominantEndingRoute,
+      dominantBranch,
       performanceTier,
       penaltyCount,
+      forestXpEarned,
       extendedEndingMeta?.story
     );
     const endingId = buildEndingId(activeCampaignId, dominantEndingRoute);
@@ -6196,16 +6206,9 @@ export default function App() {
     };
     const achievementTitle = formatAchievementLabel(achievementId);
     const achievementDetails = `Награда за финал ${endingRouteName[dominantEndingRoute]} в кампании «${campaignLore[activeCampaignId].title}».`;
-    const performanceLabel: Record<EndingPerformanceTier, string> = {
-      angel: "Ангел",
-      good: "Хороший",
-      normal: "Нормальный",
-      bad: "Плохой",
-      harsh: "Жесть",
-    };
     setQuestFinalSummary({
       endingRoute: runtimeEndingId,
-      endingTitle: `${extendedEndingMeta?.label ?? endingRouteName[dominantEndingRoute]} • ${performanceLabel[performanceTier]}`,
+      endingTitle: extendedEndingMeta?.label ?? `Тактика: ${branchLabels[dominantBranch]}`,
       story: litRpgEnding,
       achievementId,
       achievementTitle,
