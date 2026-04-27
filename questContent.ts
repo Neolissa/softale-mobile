@@ -3588,9 +3588,12 @@ function buildLongCampaign(seed: LongCampaignSeed): QuestCampaignContent {
   const turnsPerStage = Number.isFinite(seed.turnsPerStage) ? Math.max(1, Number(seed.turnsPerStage)) : 5;
   const blocks = seed.arcTextByStage.map((arcText, stageIdx) => {
     const nodes = Array.from({ length: turnsPerStage }, (_, turnIdx) => {
-      const opponent = seed.opponents[(turnIdx + stageIdx) % seed.opponents.length];
-      const emotion = seed.emotions[(turnIdx * 2 + stageIdx) % seed.emotions.length];
-      const toxicLine = seed.toxicLines[(turnIdx * 3 + stageIdx) % seed.toxicLines.length];
+      // Внутри одного этапа держим единый POV спикера, чтобы не ломать сюжетную арку
+      // бессвязной ротацией персонажей и интонаций.
+      const stageSpeakerIdx = stageIdx % seed.opponents.length;
+      const opponent = seed.opponents[stageSpeakerIdx];
+      const emotion = seed.emotions[stageSpeakerIdx % seed.emotions.length];
+      const toxicLine = seed.toxicLines[(stageIdx + turnIdx) % seed.toxicLines.length];
       const stageSituationsPool = stageSituations[stageIdx]?.length ? stageSituations[stageIdx] : defaultStageSituations[stageIdx % defaultStageSituations.length];
       const stagePromptsPool =
         decisionPromptTemplates[stageIdx]?.length ? decisionPromptTemplates[stageIdx] : defaultDecisionPromptTemplates[stageIdx % defaultDecisionPromptTemplates.length];
