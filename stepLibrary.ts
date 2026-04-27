@@ -129,21 +129,14 @@ function computeBranchEffects(
   correctSingle: number,
   trapIndex: number
 ): [BranchId, BranchId, BranchId, BranchId, BranchId] {
-  const pressureBranch: BranchId = idx % 2 === 0 ? "challenger" : "architect";
-  const bestBranch = inferBestBranchByHint(hint, stageIdx, idx);
-  const tuple: BranchId[] = [
-    pressureBranch,
-    bestBranch,
-    pressureBranch === "challenger" ? "architect" : "challenger",
-    bestBranch,
-    "architect",
-  ];
-  const safeCorrect = Math.max(0, Math.min(4, correctSingle));
-  const safeTrap = Math.max(0, Math.min(4, trapIndex));
-  // Корректный ответ должен вести в "сильную" ветку, иначе оценка и тон NPC расходятся.
-  tuple[safeCorrect] = bestBranch;
-  tuple[safeTrap] = bestBranch;
-  return tuple as [BranchId, BranchId, BranchId, BranchId, BranchId];
+  void hint;
+  void stageIdx;
+  void idx;
+  void correctSingle;
+  void trapIndex;
+  // Восстанавливаем стабильный 1:1 маппинг "вариант ответа -> тактика".
+  // Это дает предсказуемый тон NPC-реакции и совпадение с цветами/статистикой.
+  return ["strategist", "empath", "boundary", "challenger", "architect"];
 }
 
 export function resolveNpcReactionLine(

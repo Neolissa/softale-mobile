@@ -2619,11 +2619,11 @@ const branchScaleUi: Record<BranchId, { label: string; color: string }> = {
   architect: { label: "Системность и правила", color: "#B39DFF" },
 };
 const reactionColorByBranch: Record<BranchId, string> = {
-  strategist: "#6EC1FF",
-  empath: "#34D399",
-  boundary: "#C9A227",
-  challenger: "#F97316",
-  architect: "#B39DFF",
+  strategist: branchScaleUi.strategist.color,
+  empath: branchScaleUi.empath.color,
+  boundary: branchScaleUi.boundary.color,
+  challenger: branchScaleUi.challenger.color,
+  architect: branchScaleUi.architect.color,
 };
 
 function pickSceneEmoji(dilemma: string, idx: number) {
