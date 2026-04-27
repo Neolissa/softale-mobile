@@ -402,7 +402,7 @@ function createSeedUsers(nowIso: string): Record<string, AuthUser> {
       email: ADMIN_EMAIL,
       password: ADMIN_PASSWORD,
       role: "ADMIN",
-      profile: buildDefaultProfile(),
+      profile: buildAdminProfile(),
       analytics: buildDefaultAnalytics(nowIso),
     },
     [USER_EMAIL]: {
@@ -4614,6 +4614,28 @@ function buildDefaultProfile(): UserProfile {
   };
 }
 
+function withAdminProfileDefaults(profile: UserProfile): UserProfile {
+  const allStoryIds = storyConfigs.map((story) => story.id);
+  return {
+    ...profile,
+    profileSetupDone: true,
+    diagnosticCompleted: true,
+    activeTab: "admin",
+    selectedStory: storyConfigs.some((story) => story.id === profile.selectedStory)
+      ? profile.selectedStory
+      : (allStoryIds[0] ?? "forest"),
+    selectedCourseId: courses.some((course) => course.id === profile.selectedCourseId)
+      ? profile.selectedCourseId
+      : (courses[0]?.id ?? "office-icebreaker"),
+    // Админу открываем полную библиотеку квестов для быстрой проверки контента.
+    startedStoryIds: allStoryIds,
+  };
+}
+
+function buildAdminProfile(): UserProfile {
+  return withAdminProfileDefaults(buildDefaultProfile());
+}
+
 export default function App() {
   const defaultProfile = useMemo(() => buildDefaultProfile(), []);
   const [authReady, setAuthReady] = useState(false);
@@ -5593,7 +5615,7 @@ export default function App() {
           email: ADMIN_EMAIL,
           password: ADMIN_PASSWORD,
           role: "ADMIN",
-          profile: buildDefaultProfile(),
+          profile: buildAdminProfile(),
           analytics: buildDefaultAnalytics(nowIso),
         };
         parsed.users[USER_EMAIL] ??= {
@@ -5606,6 +5628,9 @@ export default function App() {
         Object.values(parsed.users).forEach((entry) => {
           if (!entry.role) {
             entry.role = entry.email === ADMIN_EMAIL ? "ADMIN" : "USER";
+          }
+          if ((entry.role ?? "USER") === "ADMIN") {
+            entry.profile = withAdminProfileDefaults(entry.profile);
           }
         });
         await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(parsed));
@@ -6904,7 +6929,7 @@ export default function App() {
         email: ADMIN_EMAIL,
         password: ADMIN_PASSWORD,
         role: "ADMIN",
-        profile: buildDefaultProfile(),
+        profile: buildAdminProfile(),
         analytics: buildDefaultAnalytics(nowIso),
       };
       store.users[USER_EMAIL] ??= {
@@ -6917,6 +6942,9 @@ export default function App() {
       Object.values(store.users).forEach((entry) => {
         if (!entry.role) {
           entry.role = entry.email === ADMIN_EMAIL ? "ADMIN" : "USER";
+        }
+        if ((entry.role ?? "USER") === "ADMIN") {
+          entry.profile = withAdminProfileDefaults(entry.profile);
         }
       });
 
@@ -6961,6 +6989,9 @@ export default function App() {
       if (existingUser.password !== authPassword) {
         setAuthError("Неверный пароль.");
         return;
+      }
+      if ((existingUser.role ?? "USER") === "ADMIN") {
+        existingUser.profile = withAdminProfileDefaults(existingUser.profile);
       }
 
       store.currentEmail = email;
@@ -7112,7 +7143,7 @@ export default function App() {
         email: ADMIN_EMAIL,
         password: ADMIN_PASSWORD,
         role: "ADMIN",
-        profile: buildDefaultProfile(),
+        profile: buildAdminProfile(),
         analytics: buildDefaultAnalytics(nowIso),
       };
       store.users[USER_EMAIL] ??= {
@@ -7125,6 +7156,9 @@ export default function App() {
       Object.values(store.users).forEach((entry) => {
         if (!entry.role) {
           entry.role = entry.email === ADMIN_EMAIL ? "ADMIN" : "USER";
+        }
+        if ((entry.role ?? "USER") === "ADMIN") {
+          entry.profile = withAdminProfileDefaults(entry.profile);
         }
       });
 
@@ -7685,7 +7719,10 @@ export default function App() {
   };
   const applyServerUserSnapshot = (email: string, role: UserRole, profileInput: unknown, walletInput?: EconomySnapshot) => {
     skipNextServerProfileSyncRef.current = true;
-    const profile = (profileInput && typeof profileInput === "object" ? profileInput : {}) as Partial<UserProfile>;
+    const rawProfile = (profileInput && typeof profileInput === "object" ? profileInput : {}) as Partial<UserProfile>;
+    const profile = role === "ADMIN"
+      ? withAdminProfileDefaults({ ...buildDefaultProfile(), ...rawProfile })
+      : rawProfile;
     const safeDisplayName = sanitizeShortText(profile.displayName, "Герой леса", 60);
     const safePrimaryStyle = sanitizeConflictStyle(profile.conflictPrimaryStyle);
 
@@ -8326,7 +8363,7 @@ export default function App() {
     );
   }
 
-  if (!diagnosticCompleted) {
+  if (!diagnosticCompleted && currentUserRole !== "ADMIN") {
     return (
       <SafeAreaView style={styles.root}>
         <StatusBar style="light" />
