@@ -3689,6 +3689,10 @@ function shuffleWords(words: string[]) {
   return copy;
 }
 
+function orderedIndices(size: number) {
+  return Array.from({ length: size }, (_, idx) => idx);
+}
+
 function shuffleIndices(size: number) {
   const copy = Array.from({ length: size }, (_, idx) => idx);
   for (let i = copy.length - 1; i > 0; i -= 1) {

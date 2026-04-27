@@ -3,7 +3,7 @@
  * сцена, оппонент, реплика, вопрос (instruction), подсказка и пять вариантов
  * всегда согласованы по одному индексу шага.
  */
-import { editorialStepOptionsByCampaign, manualInstructionByCampaign } from "./scenarioBible";
+import { editorialStepOptionsByCampaign, manualInstructionByCampaign, manualOpponentLineByCampaign } from "./scenarioBible";
 import type { ScenarioCampaignId } from "./scenarioBible";
 import { reactionOverridesByCampaignStep, reactionPoolsByCampaign } from "./reactionPoolsByCampaign";
 import {
@@ -319,7 +319,13 @@ function buildFromLongSeed(seed: LongCampaignSeed): StepLibraryEntry[] {
     throw new Error(`[stepLibrary] Кампания "${seed.id}": manualInstructionByCampaign содержит ${manual.length} вопросов, нужно ${total}`);
   }
   assertUniqueQuestions(seed.id, instructions);
-  const opponentLines = flattenOpponentLines(seed, scenes, stages, tps);
+  const manualOpponentLines = manualOpponentLineByCampaign[seed.id as ScenarioCampaignId];
+  const opponentLines = manualOpponentLines?.length
+    ? manualOpponentLines.map((line) => line.trim())
+    : flattenOpponentLines(seed, scenes, stages, tps);
+  if (manualOpponentLines?.length && manualOpponentLines.length !== total) {
+    throw new Error(`[stepLibrary] Кампания "${seed.id}": manualOpponentLineByCampaign содержит ${manualOpponentLines.length} реплик, нужно ${total}`);
+  }
   const out: StepLibraryEntry[] = [];
   for (let i = 0; i < total; i += 1) {
     const stageIdx = Math.floor(i / tps);
