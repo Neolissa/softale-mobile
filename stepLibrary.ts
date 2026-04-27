@@ -138,7 +138,10 @@ function computeBranchEffects(
     bestBranch,
     "architect",
   ];
+  const safeCorrect = Math.max(0, Math.min(4, correctSingle));
   const safeTrap = Math.max(0, Math.min(4, trapIndex));
+  // Корректный ответ должен вести в "сильную" ветку, иначе оценка и тон NPC расходятся.
+  tuple[safeCorrect] = bestBranch;
   tuple[safeTrap] = bestBranch;
   return tuple as [BranchId, BranchId, BranchId, BranchId, BranchId];
 }
