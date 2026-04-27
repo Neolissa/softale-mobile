@@ -365,6 +365,7 @@ type CourseConfig = {
 
 const AUTH_STORAGE_KEY = "softale_auth_v1";
 const RUNTIME_QUEST_PROGRESS_KEY = "softale_runtime_quest_progress_v1";
+const DAILY_CLAIM_STORAGE_KEY_PREFIX = "softale_daily_claim_v1";
 const ANALYTICS_EVENTS_LIMIT = 400;
 const ADMIN_EMAIL = "neolissa@gmail.com";
 const ADMIN_PASSWORD = "neolissaAdmin1001001";
@@ -2770,11 +2771,11 @@ function buildFinalStoryByOutcome(
   const campaignName = campaignLore[campaign].title;
   if (campaign === "sherlock-gaslighter") {
     const sherlockByTier: Record<EndingPerformanceTier, string> = {
-      angel: "Ты довела расследование до доказуемого финала: цепочка улик закрыта, манипуляции вскрыты, артефакт возвращен в фонд, а давление Доктора Лайтмана больше не работает.",
-      good: "Ты удержала дело в фактах и не дала увести его в театр эмоций. Главные эпизоды доказаны, но часть контуров пришлось закрывать на пределе времени и ресурса.",
-      normal: "Ты вышла к рабочему итогу, но не все уязвимости удалось закрыть. По делу есть результат, однако отдельные зоны останутся точкой риска для следующего раунда.",
-      bad: "В решающих сценах инициатива уходила к оппоненту: ты видела подмену, но не везде смогла закрепить доказательства процедурно. Доктор Лайтман уходит без приговора, артефакт потерян, а в деле остаются только версии и сомнения.",
-      harsh: "Эмоции и страх перехватили управление в ключевой момент. Ты уверена, что преступник был рядом, но доказательный контур развалился, артефакт утрачен, а финал расследования оказался трагически незавершенным.",
+      angel: "Ты довел расследование до доказуемого финала: цепочка улик закрыта, манипуляции вскрыты, артефакт возвращен в фонд, а давление Доктора Лайтмана больше не работает.",
+      good: "Ты удержал дело в фактах и не дал увести его в театр эмоций. Главные эпизоды доказаны, но часть контуров пришлось закрывать на пределе времени и ресурса.",
+      normal: "Ты вышел к рабочему итогу, но не все уязвимости удалось закрыть. По делу есть результат, однако отдельные зоны останутся точкой риска для следующего раунда.",
+      bad: "В решающих сценах инициатива уходила к оппоненту: ты видел подмену, но не везде смог закрепить доказательства процедурно. Доктор Лайтман уходит без приговора, артефакт потерян, а в деле остаются только версии и сомнения.",
+      harsh: "Эмоции и страх перехватили управление в ключевой момент. Ты уверен, что преступник был рядом, но доказательный контур развалился, артефакт утрачен, а финал расследования оказался трагически незавершенным.",
     };
     return `${xpLine} ${tacticLine} ${sherlockByTier[tier]}`;
   }
@@ -4541,6 +4542,10 @@ function sanitizeAvatarUri(value: unknown): string | null {
   }
 
   return trimmed.slice(0, 2000);
+}
+
+function getDailyClaimStorageKey(email: string) {
+  return `${DAILY_CLAIM_STORAGE_KEY_PREFIX}:${email}`;
 }
 
 async function makePersistableAvatarUri(rawUri: string): Promise<string> {
@@ -7761,6 +7766,31 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const hydrateDailyClaimTimestamp = async () => {
+      if (!currentUserEmail || !isProfileHydrated) {
+        return;
+      }
+      try {
+        const localDailyClaimAt = await AsyncStorage.getItem(getDailyClaimStorageKey(currentUserEmail));
+        if (!localDailyClaimAt) {
+          return;
+        }
+        const localMs = Date.parse(localDailyClaimAt);
+        if (!Number.isFinite(localMs)) {
+          return;
+        }
+        const profileMs = claimedDailyEnergyAt ? Date.parse(claimedDailyEnergyAt) : 0;
+        if (!profileMs || localMs > profileMs) {
+          setClaimedDailyEnergyAt(localDailyClaimAt);
+        }
+      } catch {
+        // Best-effort local restore; ignore storage errors.
+      }
+    };
+    hydrateDailyClaimTimestamp().catch(() => undefined);
+  }, [claimedDailyEnergyAt, currentUserEmail, isProfileHydrated]);
+
   const dailyClaimCooldownMs = useMemo(() => {
     const last = claimedDailyEnergyAt ? Date.parse(claimedDailyEnergyAt) : 0;
     if (!last) {
@@ -7863,9 +7893,13 @@ export default function App() {
     setIsClaimingDailyEnergy(true);
     if (economyMode === "server") {
       try {
+        const nowIso = new Date().toISOString();
         const snapshot = await economyApi.claimDaily();
         applyEconomySnapshot(snapshot);
-        setClaimedDailyEnergyAt(new Date().toISOString());
+        setClaimedDailyEnergyAt(nowIso);
+        if (currentUserEmail) {
+          await AsyncStorage.setItem(getDailyClaimStorageKey(currentUserEmail), nowIso);
+        }
         setPromoInfo("Ежедневный бонус начислен (server).");
       } catch {
         setPromoInfo("Не удалось получить daily-бонус с сервера.");
@@ -7881,6 +7915,13 @@ export default function App() {
       return;
     }
     setClaimedDailyEnergyAt(nowIso);
+    if (currentUserEmail) {
+      try {
+        await AsyncStorage.setItem(getDailyClaimStorageKey(currentUserEmail), nowIso);
+      } catch {
+        // Ignore local timestamp write failures.
+      }
+    }
     grantEnergy(ENERGY_DAILY_BONUS, "daily_claim");
     setPromoInfo(`Ежедневный бонус: +${ENERGY_DAILY_BONUS} энергии.`);
     setIsClaimingDailyEnergy(false);

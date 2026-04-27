@@ -510,6 +510,16 @@ export function resolveNpcReactionLine(
   const toneMatrixByBranch = campaignToneMatrixById[campaign as CampaignContentId] ?? baseToneMatrixByBranch;
   const toneRows = toneMatrixByBranch[branch] ?? toneMatrixByBranch.strategist;
   const safeIdx = Math.max(0, Math.min(4, optionIdx));
+  if (campaign === "sherlock-gaslighter" && opponentName.includes("Доктор Лайтман")) {
+    const lightmanSharpBadByIdx: Partial<Record<number, string>> = {
+      0: "(с ледяной усмешкой) «Смело. Ты снова путаешь уверенность с доказательством — в суде это проживет примерно до первого вопроса».",
+      2: "(колко) «Ты сейчас не ошиблась — ты подарила защите готовую дыру. Спасибо, сэкономила мне половину работы».",
+    };
+    const sharpLine = lightmanSharpBadByIdx[safeIdx];
+    if (sharpLine) {
+      return `${opponentName.trim()}: ${sharpLine}`;
+    }
+  }
   return `${opponentName.trim()}: ${toneRows[safeIdx]}`;
 }
 
