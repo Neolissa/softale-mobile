@@ -800,6 +800,35 @@ app.get("/v1/admin/metrics", (req, res) => {
   const perUser = users
     .map((user) => {
       const userEvents24h = events24h.filter((event) => event.email === user.email);
+      const userEventsAll = events.filter((event) => event.email === user.email);
+      const byTypeAll = (type) => userEventsAll.filter((event) => event.type === type).length;
+      const topErrorTypesAll = Object.entries(
+        userEventsAll.reduce((acc, event) => {
+          if (event.type !== "answer_incorrect" || typeof event.details !== "string") return acc;
+          const match = event.details.match(/type:([^;]+)/);
+          const key = match?.[1]?.trim();
+          if (!key) return acc;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {})
+      )
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([errorType, count]) => ({ errorType, count }));
+      const topTacticsAll = Object.entries(
+        userEventsAll.reduce((acc, event) => {
+          if ((event.type !== "answer_correct" && event.type !== "answer_incorrect") || typeof event.details !== "string") return acc;
+          const match = event.details.match(/tactic:([^;]+)/);
+          const key = match?.[1]?.trim();
+          if (!key || key === "n/a") return acc;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {})
+      )
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([tactic, count]) => ({ tactic, count }));
+
       return {
         email: user.email,
         role: user.role,
@@ -808,11 +837,44 @@ app.get("/v1/admin/metrics", (req, res) => {
           xp: user.wallet?.xp ?? 0,
           energy: user.wallet?.energy ?? 0
         },
+        profile: {
+          displayName: user.profile?.displayName || "Игрок",
+          avatarUri: user.profile?.avatarUri || null,
+          aboutMe: user.profile?.aboutMe || "",
+          completedCount: Number.isFinite(user.profile?.completedCount) ? user.profile.completedCount : 0,
+          conflictPrimaryStyle: user.profile?.conflictPrimaryStyle || "avoiding"
+        },
         events24h: userEvents24h.length,
         sessions24h: userEvents24h.filter((event) => event.type === "session_start").length,
         dropOff24h: userEvents24h.filter((event) => event.type === "drop_off").length,
         questStarts24h: userEvents24h.filter((event) => event.type === "quest_start").length,
-        questCompletions24h: userEvents24h.filter((event) => event.type === "quest_complete").length
+        questCompletions24h: userEvents24h.filter((event) => event.type === "quest_complete").length,
+        countersAll: {
+          sessions: byTypeAll("session_start"),
+          questStarts: byTypeAll("quest_start"),
+          questCompletions: byTypeAll("quest_complete"),
+          courseStarts: byTypeAll("course_start"),
+          courseCompletions: byTypeAll("course_complete"),
+          stageStarts: byTypeAll("stage_start"),
+          stageCompletions: byTypeAll("stage_complete"),
+          stepFails: byTypeAll("step_fail"),
+          penalties: byTypeAll("penalty_applied"),
+          dropOffs: byTypeAll("drop_off"),
+          answerCorrect: byTypeAll("answer_correct"),
+          answerIncorrect: byTypeAll("answer_incorrect")
+        },
+        topErrorTypesAll,
+        topTacticsAll,
+        recentEvents: userEventsAll
+          .slice()
+          .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+          .slice(0, 8)
+          .map((event) => ({
+            id: event.id,
+            at: event.at,
+            type: event.type,
+            details: event.details || ""
+          }))
       };
     })
     .sort((a, b) => Date.parse(b.lastSeenAt || "") - Date.parse(a.lastSeenAt || ""))

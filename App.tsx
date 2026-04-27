@@ -329,6 +329,11 @@ type AdminUserView = {
   xp: number;
   energy: number;
   analytics: UserAnalytics;
+  displayName?: string;
+  avatarUri?: string | null;
+  aboutMe?: string;
+  completedCount?: number;
+  conflictPrimaryStyle?: ConflictStyleId;
 };
 type DiagnosticOption = {
   text: string;
@@ -5067,19 +5072,46 @@ export default function App() {
           const seedIso = user.lastSeenAt ?? new Date().toISOString();
           const analytics = buildDefaultAnalytics(seedIso);
           analytics.lastSeenAt = user.lastSeenAt ?? analytics.lastSeenAt;
-          analytics.totalSessions = user.sessions24h;
-          analytics.counters.questStarts = user.questStarts24h;
-          analytics.counters.questCompletions = user.questCompletions24h;
-          analytics.counters.dropOffs = user.dropOff24h;
+          analytics.totalSessions = user.countersAll.sessions;
+          analytics.counters.questStarts = user.countersAll.questStarts;
+          analytics.counters.questCompletions = user.countersAll.questCompletions;
+          analytics.counters.courseStarts = user.countersAll.courseStarts;
+          analytics.counters.courseCompletions = user.countersAll.courseCompletions;
+          analytics.counters.stageStarts = user.countersAll.stageStarts;
+          analytics.counters.stageCompletions = user.countersAll.stageCompletions;
+          analytics.counters.stepFails = user.countersAll.stepFails;
+          analytics.counters.penalties = user.countersAll.penalties;
+          analytics.counters.dropOffs = user.countersAll.dropOffs;
+          analytics.counters.answersCorrect = user.countersAll.answerCorrect;
+          analytics.counters.answersIncorrect = user.countersAll.answerIncorrect;
+          analytics.answerByErrorType = user.topErrorTypesAll.reduce<Record<string, number>>((acc, item) => {
+            acc[item.errorType] = item.count;
+            return acc;
+          }, {});
+          analytics.answerByTactic = user.topTacticsAll.reduce<Record<string, number>>((acc, item) => {
+            acc[item.tactic] = item.count;
+            return acc;
+          }, {});
+          analytics.events = user.recentEvents.map((event) => ({
+            id: event.id,
+            at: event.at,
+            type: event.type as AnalyticsEventType,
+            details: event.details,
+          }));
           return {
             email: user.email,
             role: (user.role as UserRole) ?? "USER",
             xp: user.wallet.xp,
             energy: user.wallet.energy,
             analytics,
+            displayName: sanitizeShortText(user.profile.displayName, "Игрок", 60),
+            avatarUri: sanitizeAvatarUri(user.profile.avatarUri),
+            aboutMe: sanitizeShortText(user.profile.aboutMe, "", 180),
+            completedCount: typeof user.profile.completedCount === "number" ? user.profile.completedCount : 0,
+            conflictPrimaryStyle: sanitizeConflictStyle(user.profile.conflictPrimaryStyle),
           };
         });
-        setAdminUsers(nextAdminUsers);
+        setAdminUsers(nextAdminUsers.sort((a, b) => (a.analytics.lastSeenAt < b.analytics.lastSeenAt ? 1 : -1)));
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Не удалось загрузить серверные метрики.";
@@ -9851,6 +9883,7 @@ export default function App() {
                   <View style={styles.adminCardHeader}>
                     <View style={styles.adminCardHeadMain}>
                       <Text style={styles.cardTitle}>{email}</Text>
+                      {!!user.displayName && <Text style={styles.cardMeta}>Профиль: {user.displayName}</Text>}
                       <Text style={styles.cardMeta}>Роль: {user.role} • XP: {user.xp} • Энергия: {user.energy}</Text>
                     </View>
                     <AppButton
@@ -9876,6 +9909,13 @@ export default function App() {
                       </View>
                       <Text style={styles.cardMeta}>Первый вход: {new Date(data.firstSeenAt).toLocaleString()}</Text>
                       <Text style={styles.cardMeta}>Последняя активность: {new Date(data.lastSeenAt).toLocaleString()}</Text>
+                      {!!user.aboutMe && <Text style={styles.cardMeta}>О себе: {user.aboutMe}</Text>}
+                      <Text style={styles.cardMeta}>
+                        Завершено квестов: {user.completedCount ?? 0} • Базовый стиль:{" "}
+                        {user.conflictPrimaryStyle
+                          ? (conflictStyles.find((style) => style.id === user.conflictPrimaryStyle)?.label ?? user.conflictPrimaryStyle)
+                          : "n/a"}
+                      </Text>
                       <Text style={styles.cardText}>Сессий: {data.totalSessions} • Время в приложении: {Math.round(data.totalTimeSec / 60)} мин</Text>
                       <Text style={styles.cardMeta}>
                         Курсы: старт {data.counters.courseStarts} / финиш {data.counters.courseCompletions} ({completionRate}%)

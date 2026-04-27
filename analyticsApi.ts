@@ -49,11 +49,35 @@ export type AdminMetricsResponse = {
     role: string;
     lastSeenAt: string | null;
     wallet: { xp: number; energy: number };
+    profile: {
+      displayName: string;
+      avatarUri: string | null;
+      aboutMe: string;
+      completedCount: number;
+      conflictPrimaryStyle: string;
+    };
     events24h: number;
     sessions24h: number;
     dropOff24h: number;
     questStarts24h: number;
     questCompletions24h: number;
+    countersAll: {
+      sessions: number;
+      questStarts: number;
+      questCompletions: number;
+      courseStarts: number;
+      courseCompletions: number;
+      stageStarts: number;
+      stageCompletions: number;
+      stepFails: number;
+      penalties: number;
+      dropOffs: number;
+      answerCorrect: number;
+      answerIncorrect: number;
+    };
+    topErrorTypesAll: Array<{ errorType: string; count: number }>;
+    topTacticsAll: Array<{ tactic: string; count: number }>;
+    recentEvents: Array<{ id: string; at: string; type: string; details: string }>;
   }>;
 };
 
