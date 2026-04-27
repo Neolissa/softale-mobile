@@ -4831,10 +4831,10 @@ export default function App() {
   const dominantBranch: BranchId = (Object.entries(branchScore).sort((a, b) => b[1] - a[1])[0]?.[0] ??
     "strategist") as BranchId;
   const dominantEndingRoute: EndingRouteId = endingRouteByBranch[dominantBranch];
-  const visibleStepScene =
-    activeForestStep?.sceneByBranch
-      ? activeForestStep.sceneByBranch[dominantBranch]
-      : activeForestStep?.scene;
+  // До выбора игрока показываем только исходную сцену шага.
+  // Ветвевые NPC-реакции (sceneByBranch) относятся к последствиям выбора и
+  // иначе ломают логическую связку "сцена -> реплика NPC -> варианты".
+  const visibleStepScene = activeForestStep?.scene;
   const activeNpcGender: CharacterGender = inferCharacterGenderBySpeaker(
     activeForestStep?.opponentName ?? opponentNameByCampaign[activeCampaignId],
     activeCampaignId
