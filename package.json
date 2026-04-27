@@ -20,6 +20,7 @@
     "web:build": "expo export --platform web --output-dir dist",
     "web:preview": "npx serve dist",
     "content:audit": "node ./scripts/content-audit.js",
+    "build:npc-reactions": "tsx ./scripts/build-npc-reactions.ts",
     "prepush:check": "npm run content:audit && npm run web:build",
     "prepare": "husky"
   },
@@ -38,6 +39,7 @@
   "devDependencies": {
     "@types/react": "~19.1.0",
     "husky": "^9.1.7",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.2"
   },
   "private": true

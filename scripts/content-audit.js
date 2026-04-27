@@ -8,6 +8,8 @@ const root = path.resolve(__dirname, "..");
 const filesToScan = [
   path.join(root, "scenarioBible.ts"),
   path.join(root, "questContent.ts"),
+  path.join(root, "stepLibrary.ts"),
+  path.join(root, "reactionPoolsByCampaign.ts"),
 ];
 const appFilePath = path.join(root, "App.tsx");
 

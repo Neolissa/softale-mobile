@@ -4,7 +4,21 @@ import * as ImagePicker from "expo-image-picker";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { type ComponentProps, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCampaignBlockArc, getCampaignNodes, seasonalEventMvp, type QuestNarrativeNode, type SeasonalEventStep } from "./questContent";
+import { seasonalEventMvp, type CampaignContentId, type SeasonalEventStep } from "./questContent";
+import {
+  getCampaignBlockArc,
+  getStageIdxLinear,
+  resolveNpcReactionLine,
+  stepLibraryByCampaign,
+} from "./stepLibrary";
+import npcReactionsPrebuilt from "./content/npc-reactions/all.json";
+
+type NpcReactionsPrebuiltMap = Record<string, Record<string, Record<string, string>>>;
+const NPC_REACTIONS_FROM_BUILD = npcReactionsPrebuilt as NpcReactionsPrebuiltMap;
+
+function pickBuiltNpcReaction(campaign: CampaignContentId, stepIdx: number, optionIdx: number): string | undefined {
+  return NPC_REACTIONS_FROM_BUILD[campaign]?.[String(stepIdx)]?.[String(optionIdx)];
+}
 import { economyApi, type EconomySnapshot } from "./economyApi";
 import { authApi } from "./authApi";
 import { analyticsApi, type AdminMetricsResponse } from "./analyticsApi";
@@ -2588,44 +2602,6 @@ const opponentNameByCampaign: Record<CampaignId, string> = {
   "mirror-of-truth": "Собеседник",
 };
 
-const stageQuestionLeadByStage: [string[], string[], string[], string[], string[]] = [
-  [
-    "С чего начнешь, чтобы сразу не отдать контроль?",
-    "Какой первый ответ здесь самый взрослый и рабочий?",
-    "Как войти в этот разговор без капитуляции и без атаки?",
-    "Что сказать первым, чтобы не разогнать конфликт?",
-    "Какой стартовый ход дает тебе опору в сцене?",
-  ],
-  [
-    "Как ответить под давлением и не потерять достоинство?",
-    "Какой выбор удержит и суть, и уважение?",
-    "Что сейчас сработает лучше: жесткость, пауза или структура?",
-    "Какой ответ снизит накал и сохранит влияние?",
-    "Как провести этот момент без лишних потерь?",
-  ],
-  [
-    "Какой ход ломает старый токсичный сценарий?",
-    "Что здесь переводит конфликт из тупика в движение?",
-    "Какой ответ меняет правила игры в твою пользу?",
-    "Как пройти перелом без самоотмены и агрессии?",
-    "Что выбрать, чтобы вернуть разговор в зрелый формат?",
-  ],
-  [
-    "Как ответить сейчас, чтобы выиграть следующий поворот?",
-    "Какой вариант дает тебе стратегическое преимущество?",
-    "Что сказать, чтобы сохранить темп и не сорваться в хаос?",
-    "Как удержать курс, когда ставки уже высокие?",
-    "Какой ход прямо сейчас приближает сильный финал?",
-  ],
-  [
-    "Как закрыть эту сцену с пользой для будущих отношений?",
-    "Что выбрать, чтобы финал был сильным, а не случайным?",
-    "Какой ответ закрепит твой новый стиль общения?",
-    "Как завершить конфликт без скрытой цены на потом?",
-    "Что сейчас превратит напряжение в понятный результат?",
-  ],
-];
-
 const branchScaleUi: Record<BranchId, { label: string; color: string }> = {
   strategist: { label: "Структура и ясность", color: "#6EC1FF" },
   empath: { label: "Эмпатия и деэскалация", color: "#8EE6C4" },
@@ -2891,437 +2867,6 @@ function pickOpponentAvatar(opponentEmotion: string, replica: string, idx: numbe
   return fallback[idx % fallback.length];
 }
 
-const decisionPromptByCampaign: Record<CampaignId, [string[], string[], string[], string[], string[]]> = {
-  forest: [
-    [
-      "Как отвечаешь так, чтобы отряд услышал тебя с первого раза?",
-      "Что говоришь, чтобы не дать панике управлять группой?",
-      "Какой первый ход здесь удержит людей и маршрут?",
-      "Как берешь слово так, чтобы не усилить хаос?",
-      "Что говоришь, чтобы сохранить темп и доверие?",
-    ],
-    [
-      "Как реагируешь на давление, не сдавая управление сценой?",
-      "Что отвечаешь, когда тебя провоцируют на резкость?",
-      "Как переводишь наезд в рабочий разговор по делу?",
-      "Какой ход здесь соберет команду, а не разнесет ее?",
-      "Что говоришь, чтобы снять накал и двинуться дальше?",
-    ],
-    [
-      "Как меняешь сценарий конфликта в пользу команды?",
-      "Что отвечаешь, чтобы привычная перепалка не повторилась?",
-      "Какой репликой перехватываешь управление без унижения?",
-      "Как здесь защитить людей и не потерять дисциплину?",
-      "Что говоришь, чтобы группа приняла новую рамку?",
-    ],
-    [
-      "Как отвечаешь в критический момент, когда ставка максимальна?",
-      "Что говоришь, чтобы не сорваться в бой за эго?",
-      "Как держишь переговорный курс под открытым нажимом?",
-      "Какой ответ здесь принесет результат, а не красивый шум?",
-      "Как сохраняешь лидерство, когда тебя проверяют в лоб?",
-    ],
-    [
-      "Как закрываешь этот узел так, чтобы на следующем рейде было легче?",
-      "Что говоришь в финале, чтобы команда забрала рабочий стандарт?",
-      "Какой ответ закрепит твой зрелый стиль в конфликте?",
-      "Что выбираешь, чтобы из напряжения родилось правило, а не обида?",
-      "Как завершаешь сцену с ясностью, границами и уважением?",
-    ],
-  ],
-  romance: [
-    [
-      "Как отвечаешь так, чтобы сохранить тепло и не потерять себя?",
-      "Что говоришь, когда колкость маскируют под шутку?",
-      "Какой ход здесь защищает близость без самопредательства?",
-      "Как обозначаешь границу, не обрывая контакт?",
-      "Что отвечаешь, чтобы разговор остался взрослым?",
-    ],
-    [
-      "Как реагируешь на вину и давление без капитуляции?",
-      "Что говоришь, когда тебя толкают в роль 'вечно виноватой'?",
-      "Какой ответ тут снимает накал и возвращает уважение?",
-      "Как защищаешь свои границы, не переходя в нападение?",
-      "Что выбираешь, чтобы не дать конфликту уйти в токсичность?",
-    ],
-    [
-      "Как меняешь ритм диалога так, чтобы вас снова можно было услышать?",
-      "Что говоришь в момент, когда старый сценарий почти победил?",
-      "Какой ответ переведет спор из борьбы в договор?",
-      "Как защищаешь себя и не рвешь связь окончательно?",
-      "Что выбираешь, чтобы вернуть разговор в реальность, а не драму?",
-    ],
-    [
-      "Как отвечаешь на высоком градусе без ультиматумов и унижений?",
-      "Что говоришь, когда тебя толкают к резкому финалу?",
-      "Какой ход здесь работает на доверие в будущем, а не на победу в моменте?",
-      "Как удерживаешь тон, когда оппонент бьет по больному?",
-      "Что отвечаешь, чтобы не уступить давлению и не закрыться?",
-    ],
-    [
-      "Как закрываешь финальный разговор по-взрослому и ясно?",
-      "Что говоришь в точке выбора, чтобы сохранить достоинство обоих?",
-      "Какой ответ закрепит новый стиль вашей связи?",
-      "Что выбираешь, чтобы после сцены осталось уважение, а не пепел?",
-      "Как формулируешь финал: честно, тепло и с границами?",
-    ],
-  ],
-  slytherin: [
-    [
-      "Как отвечаешь, чтобы не потерять статус и не скатиться в дешёвую токсичность?",
-      "Что говоришь, когда тебя проверяют на вес в круге?",
-      "Какой ход здесь защитит позицию и правила одновременно?",
-      "Как держишь хладнокровие, когда тебя публично обесценивают?",
-      "Что отвечаешь, чтобы развернуть колкость в деловой формат?",
-    ],
-    [
-      "Как реагируешь на интригу так, чтобы не кормить её?",
-      "Что говоришь, когда на тебя давят через лояльность и намёки?",
-      "Какой ответ сохраняет влияние без подковёрной грязи?",
-      "Как держишь разговор в поле правил, а не слухов?",
-      "Что выбираешь, чтобы не уступить манипуляции?",
-    ],
-    [
-      "Как перехватываешь управление, когда тебя тянут в старую игру?",
-      "Что говоришь, чтобы обнулить личные выпады и вернуть критерии?",
-      "Какой ход укрепляет твою линию без войны за лица?",
-      "Как отвечаешь, когда формально всё 'вежливо', но токсично по сути?",
-      "Что выбираешь, чтобы закрепить честный контур решения?",
-    ],
-    [
-      "Как держишь темп эндшпиля и не теряешь достоинство?",
-      "Что отвечаешь в момент, где ставят на твою капитуляцию?",
-      "Какой ход здесь конвертирует давление в переговорное преимущество?",
-      "Как защищаешь команду и не сдаёшь позиции?",
-      "Что говоришь, чтобы закрыть раунд в свою пользу по правилам?",
-    ],
-    [
-      "Как формулируешь финал так, чтобы твоя линия стала новой нормой?",
-      "Что говоришь, когда от тебя ждут либо подчинения, либо скандала?",
-      "Какой ответ закрепит влияние без унижения других?",
-      "Что выбираешь, чтобы после партии осталась работающая система?",
-      "Как закрываешь сезон: хладнокровно, ясно и по-взрослому?",
-    ],
-  ],
-  boss: [
-    [
-      "Как отвечаешь начальнице так, чтобы не сжечь мост и не проглотить наезд?",
-      "Что говоришь, когда давление подают как 'деловой стиль'?",
-      "Какой ход здесь защитит результат и твоё достоинство?",
-      "Как обозначаешь рамку разговора в рабочем, а не личном поле?",
-      "Что отвечаешь, чтобы вернуть фокус на задачу и критерии?",
-    ],
-    [
-      "Как держишь позицию, когда тебя публично прожимают?",
-      "Что говоришь, если тебя пытаются ускорить через стыд и страх?",
-      "Какой ответ не даст конфликту перейти в личную расправу?",
-      "Как переводишь жёсткий тон в формат решения?",
-      "Что выбираешь, чтобы команда увидела в тебе опору, а не жертву?",
-    ],
-    [
-      "Как меняешь сценарий 'дожима' на сценарий 'управления'?",
-      "Что говоришь, когда от тебя ждут покорности вместо зрелости?",
-      "Какой ход закрепляет твоё лидерство без крика?",
-      "Как отвечаешь, чтобы признать риск и не сдать границы?",
-      "Что выбираешь, чтобы спор дал системе плюс, а не шрам?",
-    ],
-    [
-      "Как держишь удар в финальном давлении и не теряешь ясность?",
-      "Что говоришь, когда тебя подталкивают к небезопасному решению?",
-      "Какой ответ защищает команду и бизнес одновременно?",
-      "Как отвечаешь на ультиматум без оборонительной суеты?",
-      "Что выбираешь, чтобы выиграть не только сейчас, но и дальше?",
-    ],
-    [
-      "Как закрываешь цикл так, чтобы правила пережили следующий кризис?",
-      "Что говоришь в финале, чтобы закрепить новый стандарт общения?",
-      "Какой ответ превращает личный конфликт в командную практику?",
-      "Что выбираешь, чтобы после шторма осталось доверие к тебе как к лидеру?",
-      "Как завершаешь сцену: твёрдо, спокойно и профессионально?",
-    ],
-  ],
-  narcissist: [
-    [
-      "Как отвечаешь на сладкую манипуляцию, не теряя контакт с реальностью?",
-      "Что говоришь, когда вину подают как доказательство любви?",
-      "Какой ход здесь защитит твою автономию без истерики?",
-      "Как обозначаешь границы, когда тебя мягко подталкивают к уступке?",
-      "Что выбираешь, чтобы не перепутать заботу и контроль?",
-    ],
-    [
-      "Как реагируешь на эмоциональный шантаж без самообвинения?",
-      "Что говоришь, когда тебя ловят на страхе потерять отношения?",
-      "Какой ответ обрывает сценарий 'ты плохая, если не согласна'?",
-      "Как держишь спокойствие, когда давление становится личным?",
-      "Что выбираешь, чтобы сохранить себя в этой связке?",
-    ],
-    [
-      "Как отвечаешь на газлайтинг так, чтобы не раствориться в сомнениях?",
-      "Что говоришь, когда твою память и чувства объявляют 'фантазией'?",
-      "Какой ход тут защищает факты и твою психическую опору?",
-      "Как останавливаешь цикл обвинений и угроз?",
-      "Что выбираешь, чтобы вернуть себе голос и контроль?",
-    ],
-    [
-      "Как действуешь на этапе выхода, не вступая в торг с насилием?",
-      "Что говоришь, когда тебя снова затягивают в эмоциональную петлю?",
-      "Какой ответ сохраняет безопасность и ясные границы?",
-      "Как удерживаешь линию, когда тебя давят страхом одиночества?",
-      "Что выбираешь, чтобы окончательно разорвать токсичный ритм?",
-    ],
-    [
-      "Как закрываешь финал так, чтобы больше не открывать дверь манипуляции?",
-      "Что говоришь в последнем разговоре, когда на тебя давят ностальгией и угрозой?",
-      "Какой ответ закрепит твою опору на себя и поддержку?",
-      "Что выбираешь, чтобы после разрыва осталась ясность, а не вина?",
-      "Как формулируешь точку: спокойно, твёрдо и окончательно?",
-    ],
-  ],
-  "sherlock-gaslighter": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "cinderella-advocate": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "healer-empathy": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "partisan-hq": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "stop-crane-train-18plus": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "first-word-forest": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "dragon-ultimatum": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "castle-boundaries": [
-    stageQuestionLeadByStage[0],
-    stageQuestionLeadByStage[1],
-    stageQuestionLeadByStage[2],
-    stageQuestionLeadByStage[3],
-    stageQuestionLeadByStage[4],
-  ],
-  "office-icebreaker": [
-    [
-      "Как отвечаешь на мостике, чтобы команда не распалась на лагеря?",
-      "Что говоришь, когда бриф превращают в насмешку?",
-      "Какой первый ход здесь вернет разговор в рабочий контур?",
-      "Как удерживаешь дисциплину без силового давления?",
-      "Что выбираешь, чтобы шторм не съел управление?",
-    ],
-    [
-      "Как реагируешь на резкость в разгаре кризиса, не теряя темпа?",
-      "Что говоришь, когда тебя провоцируют на эмоциональный срыв?",
-      "Какой ответ здесь собирает смену вокруг решения?",
-      "Как переводишь хаос в короткие понятные шаги?",
-      "Что выбираешь, чтобы сохранить команду и дедлайн?",
-    ],
-    [
-      "Как берёшь штурвал разговора без борьбы за самолюбие?",
-      "Что говоришь, когда твой план пытаются обнулить колкостью?",
-      "Какой ход закрепит новую рабочую рамку для всех?",
-      "Как отвечаешь, чтобы действия последовали сразу?",
-      "Что выбираешь, чтобы кризис стал поворотом в зрелость команды?",
-    ],
-    [
-      "Как держишь курс в финальной турбулентности и не сдаешь стандарты?",
-      "Что говоришь, когда от тебя ждут 'быстро и любой ценой'?",
-      "Какой ответ здесь защищает систему от дорогой ошибки?",
-      "Как отвечаешь на проверку лидерства в прямом эфире?",
-      "Что выбираешь, чтобы остаться опорой под давлением?",
-    ],
-    [
-      "Как закрываешь рейс так, чтобы договоренности прожили следующий шторм?",
-      "Что говоришь в финале, когда нужно закрепить новый переговорный код?",
-      "Какой ответ превращает разовый успех в рабочий стандарт?",
-      "Что выбираешь, чтобы команда унесла из кризиса зрелый навык?",
-      "Как формулируешь итог: ясно, твердо и без героической позы?",
-    ],
-  ],
-  "boundary-keeper": [
-    [
-      "Как отвечаешь, чтобы сказать 'нет' без войны и без сдачи себя?",
-      "Что говоришь, когда тебя давят виной за твои границы?",
-      "Какой ход здесь удержит уважение в обе стороны?",
-      "Как обозначаешь рамку спокойно и недвусмысленно?",
-      "Что выбираешь, чтобы сохранить контакт и самоуважение?",
-    ],
-    [
-      "Как реагируешь на стыд и сарказм, не объясняясь лишнего?",
-      "Что говоришь, когда отказ пытаются назвать эгоизмом?",
-      "Какой ответ переводит давление в взрослый формат договора?",
-      "Как защищаешь свое время и энергию без нападения?",
-      "Что выбираешь, чтобы граница осталась, а связь не сгорела?",
-    ],
-    [
-      "Как укрепляешь новую линию поведения, когда ее проверяют на прочность?",
-      "Что говоришь, когда старый сценарий 'уступи' снова запускается?",
-      "Какой ход здесь делает твой отказ понятным и устойчивым?",
-      "Как отвечаешь, чтобы не скатиться ни в агрессию, ни в уступку?",
-      "Что выбираешь, чтобы говорить прямо и экологично?",
-    ],
-    [
-      "Как держишь границы под максимальным эмоциональным нажимом?",
-      "Что говоришь, когда тебя атакуют через близость и долг?",
-      "Какой ответ здесь защищает тебя и не разрушает диалог?",
-      "Как отвечаешь, когда тебя тянут обратно в привычную роль?",
-      "Что выбираешь, чтобы не предать себя в горячем моменте?",
-    ],
-    [
-      "Как закрываешь арку так, чтобы твои границы стали нормой, а не исключением?",
-      "Что говоришь в финале, чтобы договоренности были реальными?",
-      "Какой ответ закрепит уважительный формат на будущее?",
-      "Что выбираешь, чтобы остаться теплой и твердой одновременно?",
-      "Как формулируешь итог: коротко, ясно и по-взрослому?",
-    ],
-  ],
-  "serpentine-diplomat": [
-    [
-      "Как отвечаешь в первой интриге так, чтобы не стать легкой добычей?",
-      "Что говоришь, когда тебя снижают до 'не имеющей веса'?",
-      "Какой ход здесь закрепляет позицию без театральной резкости?",
-      "Как удерживаешь разговор в поле правил и влияния?",
-      "Что выбираешь, чтобы остаться хладнокровной и точной?",
-    ],
-    [
-      "Как реагируешь на политическое давление без уступки принципам?",
-      "Что говоришь, когда лояльность используют как рычаг подчинения?",
-      "Какой ответ сохранит влияние и не втянет в грязную игру?",
-      "Как возвращаешь разговор к прозрачным условиям?",
-      "Что выбираешь, чтобы не стать частью манипулятивной схемы?",
-    ],
-    [
-      "Как меняешь правила игры, когда тебя пытаются загнать в старую роль?",
-      "Что говоришь, когда 'вежливость' прикрывает токсичную атаку?",
-      "Какой ход здесь превращает интригу в управляемый процесс?",
-      "Как отвечаешь так, чтобы круг признал новую рамку?",
-      "Что выбираешь, чтобы усилить систему, а не чей-то эго-контур?",
-    ],
-    [
-      "Как выдерживаешь эндшпиль, когда давление идет одновременно с двух сторон?",
-      "Что говоришь, когда тебя толкают к молчаливому согласию?",
-      "Какой ответ здесь принесет власть через правила, а не страх?",
-      "Как защищаешь команду и не проигрываешь стол переговоров?",
-      "Что выбираешь, чтобы закрыть раунд в стратегический плюс?",
-    ],
-    [
-      "Как завершаешь партию так, чтобы твой стиль стал нормой круга?",
-      "Что говоришь в финале, когда тебя проверяют на последовательность?",
-      "Какой ответ закрепляет влияние без унижения и давления?",
-      "Что выбираешь, чтобы в следующем цикле играть по новым правилам?",
-      "Как формулируешь итог: холодно, ясно и конструктивно?",
-    ],
-  ],
-  "heart-lines": [
-    [
-      "Как отвечаешь, чтобы остаться в близости и не раствориться в ней?",
-      "Что говоришь, когда ранят под видом шутки или заботы?",
-      "Какой ход здесь сохраняет контакт и твои границы?",
-      "Как обозначаешь потребность без упрека и стыда?",
-      "Что выбираешь, чтобы диалог остался живым и взрослым?",
-    ],
-    [
-      "Как реагируешь на накопленные обиды, не включая старую защиту?",
-      "Что говоришь, когда тебя пытаются вернуть в роль 'вечно виноватой'?",
-      "Какой ответ снимет накал и вернет взаимное уважение?",
-      "Как удерживаешь разговор в формате 'мы против проблемы'?",
-      "Что выбираешь, чтобы не уйти в сарказм и молчаливую месть?",
-    ],
-    [
-      "Как перезапускаешь язык пары в момент перелома?",
-      "Что говоришь, когда вас тянет в привычную ссору по кругу?",
-      "Какой ход поможет услышать друг друга, а не победить друг друга?",
-      "Как отвечаешь, чтобы уязвимость не превратилась в оружие?",
-      "Что выбираешь, чтобы связь стала зрелее после конфликта?",
-    ],
-    [
-      "Как держишь рамку уважения на высоком градусе эмоций?",
-      "Что говоришь, когда тебя провоцируют на резкий финал?",
-      "Какой ответ здесь сохранит достоинство обоих?",
-      "Как отвечаешь, чтобы не уйти в холод и не взорваться?",
-      "Что выбираешь, чтобы пройти сложный разговор без разрушения?",
-    ],
-    [
-      "Как закрываешь этот этап так, чтобы близость стала безопаснее?",
-      "Что говоришь в финале, чтобы договоренности были живыми, а не формальными?",
-      "Какой ответ закрепит уважение как базовую норму?",
-      "Что выбираешь, чтобы следующий конфликт проходить взрослее?",
-      "Как формулируешь итог: тепло, ясно и с опорой на себя?",
-    ],
-  ],
-  "mirror-of-truth": [
-    [
-      "Как отвечаешь, когда тебя проверяют на прочность через сомнение и обесценивание?",
-      "Что говоришь, чтобы не уступить давлению и не уйти в защиту?",
-      "Какой ход здесь сохранит ясность и самоуважение?",
-      "Как обозначаешь границы в поле формальной власти?",
-      "Что выбираешь, чтобы говорить из опоры, а не из страха?",
-    ],
-    [
-      "Как реагируешь, когда твою позицию пробуют стыдом и ярлыками?",
-      "Что говоришь, если на тебя давят 'реальностью рынка' вместо аргументов?",
-      "Какой ответ переводит разговор в деловой и честный контур?",
-      "Как удерживаешь зрелый тон, когда тебя провоцируют?",
-      "Что выбираешь, чтобы не предать свои принципы под нажимом?",
-    ],
-    [
-      "Как собираешь внутренний стержень и внешнюю структуру разговора?",
-      "Что говоришь, когда старый паттерн почти снова включился?",
-      "Какой ход закрепляет новый формат общения в команде?",
-      "Как отвечаешь, чтобы признать ошибку и не потерять позицию?",
-      "Что выбираешь, чтобы конфликт стал точкой роста, а не отката?",
-    ],
-    [
-      "Как держишь линию в финальной проверке под открытым давлением?",
-      "Что говоришь, когда тебя толкают в поспешное решение?",
-      "Какой ответ тут защищает и результат, и твою психологическую опору?",
-      "Как отвечаешь, чтобы не сгореть в чужом темпе и тоне?",
-      "Что выбираешь, чтобы пройти эту сцену без самоотмены?",
-    ],
-    [
-      "Как закрываешь арку так, чтобы новый стиль стал твоей нормой?",
-      "Что говоришь в финале, когда от тебя ждут подтверждения делом?",
-      "Какой ответ закрепит ясность, границы и ответственность?",
-      "Что выбираешь, чтобы не откатиться в старые защиты завтра?",
-      "Как формулируешь итог: спокойно, точно и по-взрослому?",
-    ],
-  ],
-  gryffindor_common_room: stageQuestionLeadByStage,
-  ravenclaw_common_room: stageQuestionLeadByStage,
-  hufflepuff_common_room: stageQuestionLeadByStage,
-};
 
 type TacticalPool = {
   strategist: string[];
@@ -3527,29 +3072,6 @@ const campaignSeed: Record<CampaignId, number> = {
   "mirror-of-truth": 31,
 };
 
-const campaignRhythmProfile: Record<CampaignId, number[]> = {
-  forest: [5, 6, 5, 5, 4],
-  romance: [4, 5, 6, 5, 5],
-  slytherin: [6, 5, 5, 4, 5],
-  boss: [5, 5, 4, 6, 5],
-  narcissist: [5, 5, 5, 5, 5, 5, 5],
-  "sherlock-gaslighter": [5, 5, 5, 5, 5, 5, 5],
-  "cinderella-advocate": [4, 5, 6, 5, 5],
-  "healer-empathy": [5, 4, 5, 6, 5],
-  "partisan-hq": [5, 6, 5, 5, 4],
-  "stop-crane-train-18plus": [4, 5, 6, 6, 4],
-  "first-word-forest": [5, 5, 5, 5, 5],
-  "dragon-ultimatum": [5, 5, 6, 5, 4],
-  "castle-boundaries": [4, 5, 6, 5, 5],
-  gryffindor_common_room: [1, 1, 1, 1, 1],
-  ravenclaw_common_room: [1, 1, 1, 1, 1],
-  hufflepuff_common_room: [1, 1, 1, 1, 1],
-  "office-icebreaker": [5, 6, 4, 6, 4],
-  "boundary-keeper": [6, 5, 5, 4, 5],
-  "serpentine-diplomat": [5, 5, 6, 4, 5],
-  "heart-lines": [5, 4, 6, 5, 5],
-  "mirror-of-truth": [5, 5, 5, 6, 4],
-};
 
 const opponentVoiceByCampaign: Record<CampaignId, { sharpeners: string[]; branchTone: Record<BranchId, string> }> = {
   forest: { sharpeners: ["через зубы", "на повышенном", "с ледяной усмешкой"], branchTone: { strategist: "сухо", empath: "резко", boundary: "жестко", challenger: "в лоб", architect: "с подтекстом угрозы" } },
@@ -3575,102 +3097,8 @@ const opponentVoiceByCampaign: Record<CampaignId, { sharpeners: string[]; branch
   "mirror-of-truth": { sharpeners: ["с экспертным высокомерием", "в давящем спокойствии", "через холодный скепсис"], branchTone: { strategist: "аналитично", empath: "сухо", boundary: "властно", challenger: "провокационно", architect: "системно-угрожаще" } },
 };
 
-function inferBestBranchByHint(hint: string, stageIdx: number, idx: number): BranchId {
-  const lowered = hint.toLowerCase();
-  if (lowered.includes("границ") || lowered.includes("рамк") || lowered.includes("неприемлем")) return "boundary";
-  if (lowered.includes("эмпат") || lowered.includes("эмоц") || lowered.includes("слы") || lowered.includes("контакт")) return "empath";
-  if (lowered.includes("правил") || lowered.includes("протокол") || lowered.includes("систем")) return "architect";
-  if (lowered.includes("манипул") || lowered.includes("ультимат") || lowered.includes("вызов") || lowered.includes("прям")) return "challenger";
-  if (lowered.includes("факт") || lowered.includes("структур") || lowered.includes("приоритет") || lowered.includes("план")) return "strategist";
-  const fallbackByStage: BranchId[] = ["strategist", "empath", "boundary", "challenger", "architect"];
-  return fallbackByStage[(stageIdx + idx) % fallbackByStage.length];
-}
 
 const globalOptionKeysRegistry = new Set<string>();
-const missingEditorialStepWarnRegistry = new Set<string>();
-
-
-function buildLitRpgStepOptions(campaign: CampaignId, node: QuestNarrativeNode, idx: number, stageIdx: number) {
-  const editorialStep = editorialStepOptionsByCampaign[campaign]?.[idx];
-  if (editorialStep) {
-    const options = editorialStep.options.map((line) => line.replace(/\s+/g, " ").trim()) as [string, string, string, string, string];
-    const correctSingle = Math.max(0, Math.min(options.length - 1, editorialStep.correctSingle));
-    const trapIndex = Math.max(0, Math.min(options.length - 1, editorialStep.trapIndex ?? 1));
-    // Строгий авторский режим: реакции опций берем только из ручной библиотеки.
-    // Если ручные реакции не заведены, не достраиваем их генератором.
-    const optionNpcReactionByIndex: Record<number, string> = {};
-    const pressureBranch: BranchId = idx % 2 === 0 ? "challenger" : "architect";
-    const bestBranch = inferBestBranchByHint(node.hint, stageIdx, idx);
-    const branchEffects: Record<number, BranchId> = {
-      0: pressureBranch,
-      1: bestBranch,
-      2: pressureBranch === "challenger" ? "architect" : "challenger",
-      3: bestBranch,
-      4: "architect",
-    };
-    branchEffects[trapIndex] = bestBranch;
-    return { options, correctSingle, branchEffects, optionNpcReactionByIndex };
-  }
-
-  const warnKey = `${campaign}:${idx}`;
-  if (!missingEditorialStepWarnRegistry.has(warnKey)) {
-    missingEditorialStepWarnRegistry.add(warnKey);
-    console.warn(`[content] needsEditorialFill for ${campaign} step ${idx + 1}`);
-  }
-
-  // Автогенерация отключена: если ручные опции еще не заведены, показываем явный редакторский placeholder.
-  const options: [string, string, string, string, string] = [
-    "Контент шага в редактуре: вариант A1 (временный placeholder)",
-    "Контент шага в редактуре: вариант A2 (временный placeholder)",
-    "Контент шага в редактуре: вариант A3 (временный placeholder)",
-    "Контент шага в редактуре: вариант A4 (временный placeholder)",
-    "Контент шага в редактуре: вариант A5 (временный placeholder)",
-  ];
-  const correctSingle = 4;
-  const optionNpcReactionByIndex: Record<number, string> = {};
-
-  const pressureBranch: BranchId = idx % 2 === 0 ? "challenger" : "architect";
-  const bestBranch = inferBestBranchByHint(node.hint, stageIdx, idx);
-  const branchEffects: Record<number, BranchId> = {
-    0: pressureBranch,
-    1: bestBranch,
-    2: pressureBranch === "challenger" ? "empath" : "boundary",
-    3: "strategist",
-    4: "architect",
-  };
-
-  return { options, correctSingle, branchEffects, optionNpcReactionByIndex };
-}
-
-function buildDecisionPrompt(campaign: CampaignId, stageIdx: number, idx: number) {
-  const pools = decisionPromptByCampaign[campaign];
-  const safeStage = Math.max(0, Math.min(pools.length - 1, stageIdx));
-  const stagePool = pools[safeStage];
-  return stagePool[idx % stagePool.length];
-}
-
-
-function getStageIdxByRhythm(campaign: CampaignId, idx: number, total: number) {
-  const minStepsPerStage = 3;
-  const maxStagesByVolume = Math.max(1, Math.floor(total / minStepsPerStage));
-  const preferredByRhythm = campaignRhythmProfile[campaign]?.length ?? 5;
-  const preferredStages = total >= 8 ? preferredByRhythm : 1;
-  const stageCount = Math.max(1, Math.min(preferredStages, maxStagesByVolume));
-  if (stageCount < campaignRhythmProfile[campaign].length) {
-    return Math.min(stageCount - 1, Math.floor((idx * stageCount) / Math.max(1, total)));
-  }
-  const weights = campaignRhythmProfile[campaign];
-  const sum = weights.reduce((acc, value) => acc + value, 0);
-  const progress = ((idx + 1) / Math.max(1, total)) * sum;
-  let cursor = 0;
-  for (let stage = 0; stage < weights.length; stage += 1) {
-    cursor += weights[stage];
-    if (progress <= cursor) {
-      return stage;
-    }
-  }
-  return Math.max(0, weights.length - 1);
-}
 
 function normalizeOptionKey(text: string) {
   return text
@@ -3769,8 +3197,7 @@ function uniquifyCampaignOptions(
   localUsedKeys: Set<string>,
   globalUsedKeys: Set<string>,
   campaign: CampaignId,
-  stepIdx: number,
-  node: QuestNarrativeNode
+  stepIdx: number
 ) {
   const contextualByCampaign: Record<CampaignId, string[]> = {
     forest: ["Держу фокус группы", "Сохраняю темп команды", "Возвращаю разговор к делу"],
@@ -3831,55 +3258,64 @@ function uniquifyCampaignOptions(
 
 function buildLitRpgCampaign(campaign: CampaignId, questions: QuestDifficulty): ForestStep[] {
   const lore = campaignLore[campaign];
-  const allNodes = getCampaignNodes(campaign);
-  const nodes = allNodes;
-  const steps = nodes.map((node, idx) => {
-    const stageIdx = getStageIdxByRhythm(campaign, idx, nodes.length);
-    const { options, correctSingle, branchEffects, optionNpcReactionByIndex } = buildLitRpgStepOptions(campaign, node, idx, stageIdx);
-    const polishedOptions = options;
-    const hasEditorialStep = Boolean(editorialStepOptionsByCampaign[campaign]?.[idx]);
-    const arcBeat = getCampaignBlockArc(campaign, stageIdx);
-    const decisionPrompt = node.decisionPrompt?.trim() || "Контент шага в редактуре: добавьте авторский вопрос.";
-    const instruction = decisionPrompt;
-    const opponentAvatar = pickOpponentAvatar(node.opponentEmotion, node.opponentReplica, idx);
+  const cid = campaign as CampaignContentId;
+  const entries = stepLibraryByCampaign[cid];
+  if (!entries?.length) {
+    throw new Error(`[App] Нет шагов в stepLibraryByCampaign для кампании "${campaign}"`);
+  }
+  const branchOrder: BranchId[] = ["strategist", "empath", "boundary", "challenger", "architect"];
+  const steps = entries.map((entry, idx) => {
+    const branchEffects: Record<number, BranchId> = {
+      0: entry.branchEffectsByOption[0],
+      1: entry.branchEffectsByOption[1],
+      2: entry.branchEffectsByOption[2],
+      3: entry.branchEffectsByOption[3],
+      4: entry.branchEffectsByOption[4],
+    };
+    const optionNpcReactionByIndex: Record<number, string> = {};
+    for (let o = 0; o < 5; o += 1) {
+      const branch = entry.branchEffectsByOption[o];
+      optionNpcReactionByIndex[o] =
+        pickBuiltNpcReaction(cid, idx, o) ?? resolveNpcReactionLine(campaign, idx, o, branch, entry.opponentName);
+    }
+    const sceneByBranch = {} as Record<BranchId, string>;
+    branchOrder.forEach((b) => {
+      const optionIdx = entry.branchEffectsByOption.indexOf(b);
+      const o = optionIdx >= 0 ? optionIdx : 0;
+      const reaction =
+        pickBuiltNpcReaction(cid, idx, o) ?? resolveNpcReactionLine(campaign, idx, o, b, entry.opponentName);
+      sceneByBranch[b] = `${entry.scene}\n\n${reaction}`;
+    });
+    const instruction = entry.instruction.trim() || "Контент шага в редактуре: добавьте авторский вопрос.";
+    const opponentAvatar = pickOpponentAvatar(entry.opponentEmotion, entry.opponentLine, idx);
     return {
       id: `${campaign}-litrpg-${idx + 1}`,
       title: `${lore.title} • Эпизод ${idx + 1}`,
       type: "single" as const,
-      scene: node.disposition,
-      sceneByBranch: {
-        strategist: node.disposition,
-        empath: node.disposition,
-        boundary: node.disposition,
-        challenger: node.disposition,
-        architect: node.disposition,
-      },
+      scene: entry.scene,
+      sceneByBranch,
       instruction,
-      dispositionText: node.disposition,
-      opponentName: node.opponentDescription,
-      opponentSpeech: node.opponentReplica,
+      dispositionText: entry.scene,
+      opponentName: entry.opponentName,
+      opponentSpeech: entry.opponentLine,
       opponentAvatar,
-      options: polishedOptions,
-      correctSingle,
+      options: entry.options,
+      correctSingle: entry.correctSingle,
       branchEffects,
       optionNpcReactionByIndex,
       endingHint: `ending-${campaign}-${(idx % 5) + 1}`,
-      skillSignals: hasEditorialStep
-        ? ["Деэскалация", "Переговоры", "Границы", "Эмпатия", "Лидерство"]
-        : ["needsEditorialFill", "Контент в редактуре"],
-      sceneEmoji: node.emoji,
-      hint: hasEditorialStep
-        ? node.hint
-        : "Контент шага в редактуре: добавьте авторскую подсказку и ручные варианты.",
+      skillSignals: ["Деэскалация", "Переговоры", "Границы", "Эмпатия", "Лидерство"],
+      sceneEmoji: entry.emoji,
+      hint: entry.hint,
       reward: 10 + Math.floor(idx / 4),
       image: lore.icon,
     } satisfies ForestStep;
   });
 
   const actual = Math.min(questions, steps.length);
-  return steps.slice(0, actual).map((step, idx) => ({
+  return steps.slice(0, actual).map((step, renameIdx) => ({
     ...step,
-    id: `${step.id}-${idx + 1}`,
+    id: `${step.id}-${renameIdx + 1}`,
   }));
 }
 
@@ -5176,6 +4612,7 @@ export default function App() {
   const [firstTrySuccess, setFirstTrySuccess] = useState(0);
   const [stepMessage, setStepMessage] = useState("Выбери действие и нажми «Сделать ход».");
   const [questHintBubbleText, setQuestHintBubbleText] = useState<string | null>(null);
+  const [questHintBubbleTitle, setQuestHintBubbleTitle] = useState("Справка");
   const [selectedDifficulty, setSelectedDifficulty] = useState<QuestDifficulty>(defaultProfile.selectedDifficulty);
   const [selectedStory, setSelectedStory] = useState<QuestStory>(defaultProfile.selectedStory);
   const [startedStoryIds, setStartedStoryIds] = useState<QuestStory[]>(defaultProfile.startedStoryIds);
@@ -5263,6 +4700,7 @@ export default function App() {
       questHintTimeoutRef.current = null;
     }
     setQuestHintBubbleText(null);
+    setQuestHintBubbleTitle("Справка");
   };
 
   const openQuestHintBubble = (text: string, source: "instruction" | "hint") => {
@@ -5272,9 +4710,11 @@ export default function App() {
     if (questHintTimeoutRef.current) {
       clearTimeout(questHintTimeoutRef.current);
     }
+    setQuestHintBubbleTitle(source === "instruction" ? "Вопрос" : "Подсказка");
     setQuestHintBubbleText(text);
     questHintTimeoutRef.current = setTimeout(() => {
       setQuestHintBubbleText(null);
+      setQuestHintBubbleTitle("Справка");
       questHintTimeoutRef.current = null;
     }, 10000);
     trackAnalyticsEvent("hint_opened", {
@@ -5337,17 +4777,16 @@ export default function App() {
   const previewStoryConfig = storyConfigs.find((story) => story.id === storyPreviewId) ?? null;
   const activeCourse = courses.find((course) => course.id === selectedCourseId) ?? courses[0];
   const activeCampaignId: CampaignId = activeProgramMode === "course" ? activeCourse.id : selectedStory;
-  const allowedStoryDifficulties =
-    activeProgramMode === "story"
-      ? activeStoryConfig.difficulties
-      : ([5, 10, 15, 25] as QuestDifficulty[]);
-  const activeDifficultyConfig = difficultyConfigs.find((item) => item.questions === selectedDifficulty) ?? difficultyConfigs[0];
+  // Пользователь не выбирает сложность вручную: она определяется структурой кампании.
+  const campaignDifficulty: QuestDifficulty =
+    activeProgramMode === "course" ? activeCourse.preferredQuestions : activeStoryConfig.difficulties[0];
+  const activeDifficultyConfig = difficultyConfigs.find((item) => item.questions === campaignDifficulty) ?? difficultyConfigs[0];
   const currentForestQuestSteps = useMemo(
     () =>
       activeProgramMode === "course"
-        ? buildCourseQuestByDifficulty(selectedDifficulty, activeCourse.id)
-        : buildForestQuestByDifficulty(selectedDifficulty, selectedStory),
-    [activeProgramMode, selectedDifficulty, activeCourse.id, selectedStory]
+        ? buildCourseQuestByDifficulty(campaignDifficulty, activeCourse.id)
+        : buildForestQuestByDifficulty(campaignDifficulty, selectedStory),
+    [activeProgramMode, campaignDifficulty, activeCourse.id, selectedStory]
   );
   const normalizedQuestSteps = useMemo(() => applyBuilderComplexityProgression(currentForestQuestSteps), [currentForestQuestSteps]);
   useEffect(() => {
@@ -5902,10 +5341,10 @@ export default function App() {
   }, [activeEventStep]);
 
   useEffect(() => {
-    if (!allowedStoryDifficulties.includes(selectedDifficulty)) {
-      setSelectedDifficulty(allowedStoryDifficulties[0]);
+    if (selectedDifficulty !== campaignDifficulty) {
+      setSelectedDifficulty(campaignDifficulty);
     }
-  }, [allowedStoryDifficulties, selectedDifficulty]);
+  }, [campaignDifficulty, selectedDifficulty]);
 
   useEffect(() => {
     if (diagnosticIndex >= diagnosticQuestions.length) {
@@ -7844,7 +7283,7 @@ export default function App() {
     [unlockedAchievements]
   );
   const stageIndexByStep = currentForestQuestSteps.map((_, idx) =>
-    getStageIdxByRhythm(activeCampaignId, idx, currentForestQuestSteps.length)
+    getStageIdxLinear(activeCampaignId, idx)
   );
   const stageCount = useMemo(
     () => (stageIndexByStep.length ? Math.max(...stageIndexByStep) + 1 : 1),
@@ -9354,11 +8793,13 @@ export default function App() {
                 )}
                 <Text style={styles.sectionLabel}>Сцена</Text>
                 <Text style={styles.questInstructionText}>{visibleStepDispositionByNpcGender || visibleStepSceneByNpcGender}</Text>
+                <Text style={styles.sectionLabel}>Реплика</Text>
                 <SpeechBubble
                   text={visibleStepSpeechByNpcGender || visibleStepSceneByNpcGender}
                   speakerName={applyGenderToNpcReplica(activeForestStep.opponentName ?? "", activeNpcGender)}
                   speakerEmoji={activeForestStep.opponentAvatar ?? activeForestStep.sceneEmoji}
                 />
+                <Text style={styles.sectionLabel}>Вопрос</Text>
                 <View style={styles.stepHintActionsRow}>
                   <Pressable
                     style={styles.hintIconCircle}
@@ -9367,55 +8808,64 @@ export default function App() {
                       openQuestHintBubble(visibleStepInstructionByPlayerGender, "instruction");
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel="Показать, что сделать сейчас"
+                    accessibilityLabel="Показать формулировку вопроса"
                   >
                     <Text style={styles.hintIconCircleText}>?</Text>
                   </Pressable>
+                  <Text style={styles.cardMeta}>Нажми «?», чтобы открыть формулировку вопроса во всплывающем окне.</Text>
+                </View>
+                <Text style={styles.sectionLabel}>Подсказка</Text>
+                <View style={styles.stepHintActionsRow}>
                   <Pressable
                     onPress={() => {
                       playSfx("swipe").catch(() => undefined);
-                      openQuestHintBubble(`Подсказка: ${visibleStepHintByPlayerGender}`, "hint");
+                      openQuestHintBubble(visibleStepHintByPlayerGender, "hint");
                     }}
                     accessibilityRole="button"
                     accessibilityLabel="Показать подсказку"
                   >
-                    <Text style={styles.hintInlineButtonText}>Подсказка</Text>
+                    <Text style={styles.hintInlineButtonText}>Показать</Text>
                   </Pressable>
+                  <Text style={styles.cardMeta}>Короткая подсказка к выбору (не готовый ответ).</Text>
                 </View>
 
-                {activeForestStep.type !== "builder" &&
-                  visibleStepOptions.map((option, idx) => {
-                    const isMultiple = activeForestStep.type === "multiple";
-                    const checked = isMultiple ? selectedMultiple.includes(idx) : selectedSingle === idx;
-                    return (
-                      <Pressable
-                        key={`${activeForestStep.id}-option-${idx}`}
-                        style={[
-                          styles.optionCard,
-                          checked && styles.optionCardActive,
-                        ]}
-                        onPress={() => {
-                          playSfx("tap").catch(() => undefined);
-                          if (isMultiple) {
-                            setSelectedMultiple((prev) => {
-                              if (prev.includes(idx)) {
-                                return prev.filter((value) => value !== idx);
-                              }
-                              const needed = activeForestStep.correctMultiple?.length ?? 2;
-                              if (prev.length >= needed) {
-                                return prev;
-                              }
-                              return [...prev, idx];
-                            });
-                            return;
-                          }
-                          setSelectedSingle(idx);
-                        }}
-                      >
-                        <Text style={styles.optionText}>{applyGenderToPlayerReplica(option, effectivePlayerGender)}</Text>
-                      </Pressable>
-                    );
-                  })}
+                {activeForestStep.type !== "builder" && (
+                  <>
+                    <Text style={styles.sectionLabel}>Варианты ответа</Text>
+                    {visibleStepOptions.map((option, idx) => {
+                      const isMultiple = activeForestStep.type === "multiple";
+                      const checked = isMultiple ? selectedMultiple.includes(idx) : selectedSingle === idx;
+                      return (
+                        <Pressable
+                          key={`${activeForestStep.id}-option-${idx}`}
+                          style={[
+                            styles.optionCard,
+                            checked && styles.optionCardActive,
+                          ]}
+                          onPress={() => {
+                            playSfx("tap").catch(() => undefined);
+                            if (isMultiple) {
+                              setSelectedMultiple((prev) => {
+                                if (prev.includes(idx)) {
+                                  return prev.filter((value) => value !== idx);
+                                }
+                                const needed = activeForestStep.correctMultiple?.length ?? 2;
+                                if (prev.length >= needed) {
+                                  return prev;
+                                }
+                                return [...prev, idx];
+                              });
+                              return;
+                            }
+                            setSelectedSingle(idx);
+                          }}
+                        >
+                          <Text style={styles.optionText}>{applyGenderToPlayerReplica(option, effectivePlayerGender)}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </>
+                )}
 
                 {activeForestStep.type === "builder" && (
                   <View style={styles.builderWrap}>
@@ -9494,7 +8944,7 @@ export default function App() {
                   <View style={styles.hintModalRoot}>
                     <Pressable style={styles.hintModalBackdrop} onPress={closeQuestHintBubble} />
                     <View style={styles.hintModalBubble}>
-                      <Text style={styles.hintModalTitle}>Подсказка</Text>
+                      <Text style={styles.hintModalTitle}>{questHintBubbleTitle}</Text>
                       <Text style={styles.hintModalText}>{questHintBubbleText}</Text>
                     </View>
                   </View>

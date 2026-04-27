@@ -36,7 +36,7 @@ type QuestStoryBlock = {
   nodes: QuestNarrativeNode[];
 };
 
-type QuestCampaignContent = {
+export type QuestCampaignContent = {
   title: string;
   setting: string;
   tone: string;
@@ -2727,7 +2727,7 @@ export const questContentByCampaign = {
   },
 } as Record<CampaignContentId, QuestCampaignContent>;
 
-type LongCampaignSeed = {
+export type LongCampaignSeed = {
   id:
     | "gryffindor_common_room"
     | "ravenclaw_common_room"
@@ -2754,7 +2754,7 @@ type LongCampaignSeed = {
   decisionPromptTemplatesByStage?: string[][];
 };
 
-const longCampaignSeeds: LongCampaignSeed[] = [
+export const longCampaignSeeds: LongCampaignSeed[] = [
   {
     id: "gryffindor_common_room",
     title: "Гостиная Гриффиндора",
@@ -3504,140 +3504,6 @@ const longCampaignSeeds: LongCampaignSeed[] = [
     ],
   },
 ];
-
-function buildLongCampaign(seed: LongCampaignSeed): QuestCampaignContent {
-  const defaultStageSituations: string[][] = [
-    [
-      "Перед стартом общего решения ты предлагаешь зафиксировать рамку разговора.",
-      "На первом собрании ты просишь обсуждать критерии, а не личности.",
-      "В дебюте конфликта ты возвращаешь разговор к общей цели команды.",
-      "В начале этапа ты предлагаешь порядок реплик, чтобы не тонуть в хаосе.",
-      "Ты открываешь обсуждение и просишь отделить факты от уколов.",
-    ],
-    [
-      "Под давлением сроков ты удерживаешь фокус на приоритетах, а не на панике.",
-      "Когда спор раскаляется, ты переводишь эмоции в проверяемые тезисы.",
-      "В середине этапа ты останавливаешь взаимные обвинения и возвращаешь структуру.",
-      "Ты фиксируешь, кто за что отвечает, чтобы снять хаос и взаимные претензии.",
-      "После резкого выпада ты просишь обсуждать действия и последствия, а не ярлыки.",
-    ],
-    [
-      "В переломной точке ты отказываешься от удобного молчания и говоришь прямо.",
-      "Ты замечаешь манипуляцию и спокойно разворачиваешь разговор к сути.",
-      "Под попыткой продавить решение ты удерживаешь границу и предлагаешь альтернативу.",
-      "На критическом узле ты выбираешь ясность вместо самооправданий.",
-      "Ты берешь инициативу и задаешь формат, в котором слышны обе стороны.",
-    ],
-    [
-      "На высоких ставках ты защищаешь позицию без агрессии и без капитуляции.",
-      "Когда давление становится личным, ты возвращаешь разговор к правилам процесса.",
-      "В предфинале ты гасишь конфликт у ворот и возвращаешь всех к конкретным мерам.",
-      "Ты закрываешь дыру в договоренностях, чтобы конфликт не повторился.",
-      "В сложном повороте ты удерживаешь контакт и требуешь конкретики.",
-    ],
-    [
-      "В финальной сцене ты подводишь конфликт к ясному решению и последствиям.",
-      "Перед развязкой ты фиксируешь, что меняется после этого разговора.",
-      "В последнем раунде ты выбираешь формулу, которая выдержит следующий кризис.",
-      "Финальный узел: ты соединяешь границы, уважение и результат в одно решение.",
-      "В развязке ты закрепляешь правила, по которым команда будет жить дальше.",
-    ],
-  ];
-  const defaultDecisionPromptTemplates: string[][] = [
-    [
-      "Как отвечаешь, чтобы задать здоровую рамку разговора с первого хода?",
-      "Что скажешь, чтобы сохранить контакт и не отдать контроль?",
-      "Какой первый ответ сразу снижает риск эскалации?",
-      "Что выберешь в этом узле, чтобы не отдать инициативу давлению?",
-      "Как удержишь курс сцены без резкости и без капитуляции?",
-    ],
-    [
-      "Как отвечаешь под давлением, чтобы не потерять позицию?",
-      "Что выберешь, чтобы напряжение не сломало результат?",
-      "Какой ответ держит и границы, и рабочий темп?",
-      "Что скажешь, чтобы сохранить результат и не потерять себя?",
-      "Какой ход гасит шум и возвращает разговор к сути?",
-    ],
-    [
-      "Какой ход ломает токсичный сценарий, не ломая диалог?",
-      "Что скажешь, чтобы остановить манипуляцию и вернуть факты?",
-      "Как отвечаешь в переломе, чтобы не уйти в оправдания или атаку?",
-      "Что выберешь, чтобы развернуть сценарий в сторону зрелого решения?",
-      "Какой ответ оставит опору на факты и границы одновременно?",
-    ],
-    [
-      "Как удержишь инициативу, когда ставки уже высокие?",
-      "Какой ответ не даст конфликту сорваться в личную войну?",
-      "Что выбрать, чтобы вывести разговор к взрослой договоренности?",
-      "Какой шаг удержит контакт, когда давление становится личным?",
-      "Что скажешь сейчас, чтобы не сорваться в старый паттерн?",
-    ],
-    [
-      "Какой финальный ответ закрепит решение и последствия?",
-      "Что скажешь, чтобы после развязки система работала устойчиво?",
-      "Как завершишь разговор так, чтобы конфликт не вернулся завтра?",
-      "Какой финальный ход делает развязку устойчивой, а не разовой?",
-      "Что закрепишь в финале, чтобы система не откатилась после сцены?",
-    ],
-  ];
-  const stageCount = Math.max(1, seed.arcTextByStage.length);
-  const stageSituations = seed.stageSituationsByStage ?? Array.from({ length: stageCount }, (_, idx) => defaultStageSituations[idx % defaultStageSituations.length]);
-  const decisionPromptTemplates =
-    seed.decisionPromptTemplatesByStage ?? Array.from({ length: stageCount }, (_, idx) => defaultDecisionPromptTemplates[idx % defaultDecisionPromptTemplates.length]);
-  // Ветвление обеспечивается вариантами ответа, а не раздуванием линейного числа шагов.
-  const turnsPerStage = Number.isFinite(seed.turnsPerStage) ? Math.max(1, Number(seed.turnsPerStage)) : 5;
-  const blocks = seed.arcTextByStage.map((arcText, stageIdx) => {
-    const nodes = Array.from({ length: turnsPerStage }, (_, turnIdx) => {
-      // Внутри одного этапа держим единый POV спикера, чтобы не ломать сюжетную арку
-      // бессвязной ротацией персонажей и интонаций.
-      const stageSpeakerIdx = stageIdx % seed.opponents.length;
-      const opponent = seed.opponents[stageSpeakerIdx];
-      const emotion = seed.emotions[stageSpeakerIdx % seed.emotions.length];
-      const toxicLine = seed.toxicLines[(stageIdx + turnIdx) % seed.toxicLines.length];
-      const stageSituationsPool = stageSituations[stageIdx]?.length ? stageSituations[stageIdx] : defaultStageSituations[stageIdx % defaultStageSituations.length];
-      const stagePromptsPool =
-        decisionPromptTemplates[stageIdx]?.length ? decisionPromptTemplates[stageIdx] : defaultDecisionPromptTemplates[stageIdx % defaultDecisionPromptTemplates.length];
-      const dispositionLead = stageSituationsPool[(turnIdx + stageIdx) % stageSituationsPool.length];
-      const decisionPrompt = stagePromptsPool[(turnIdx * 2 + stageIdx) % stagePromptsPool.length];
-      return {
-        disposition: dispositionLead,
-        opponentDescription: opponent,
-        opponentEmotion: emotion,
-        opponentReplica: toxicLine,
-        decisionPrompt,
-        emoji: seed.emojiByStage[stageIdx] ?? seed.emojiByStage[seed.emojiByStage.length - 1] ?? "🎯",
-        hint: seed.hintByStage[stageIdx] ?? seed.hintByStage[seed.hintByStage.length - 1] ?? "Держи курс на ясность, границы и следующий шаг.",
-      } satisfies QuestNarrativeNode;
-    });
-
-    return {
-      arcText,
-      nodes,
-    } satisfies QuestStoryBlock;
-  });
-
-  return {
-    title: seed.title,
-    setting: seed.setting,
-    tone: seed.tone,
-    blocks,
-  };
-}
-
-for (const seed of longCampaignSeeds) {
-  questContentByCampaign[seed.id] = buildLongCampaign(seed);
-}
-
-export function getCampaignNodes(campaign: CampaignContentId): QuestNarrativeNode[] {
-  const campaignData = questContentByCampaign[campaign];
-  return campaignData.blocks.flatMap((block) => block.nodes);
-}
-
-export function getCampaignBlockArc(campaign: CampaignContentId, stageIdx: number): string {
-  const campaignData = questContentByCampaign[campaign];
-  const safeStage = Math.max(0, Math.min(campaignData.blocks.length - 1, stageIdx));
-  return campaignData.blocks[safeStage].arcText;
-}
 
 export type SeasonalEventStepType = "single" | "multiple" | "builder";
 

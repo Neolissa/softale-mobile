@@ -18,7 +18,8 @@ export type ScenarioCampaignId =
   | "partisan-hq"
   | "cinderella-advocate"
   | "first-word-forest"
-  | "stop-crane-train-18plus";
+  | "stop-crane-train-18plus"
+  | "sherlock-gaslighter";
 
 export type ScenarioEndingTier = "angel" | "good" | "normal" | "bad" | "harsh";
 
@@ -208,6 +209,7 @@ export const achievementEmojiByCampaignTier: Record<ScenarioCampaignId, Record<S
   "cinderella-advocate": { angel: "👠", good: "⚖️", normal: "🧵", bad: "🪤", harsh: "🕰️" },
   "first-word-forest": { angel: "🌱", good: "🫧", normal: "🍃", bad: "🌫️", harsh: "🌑" },
   "stop-crane-train-18plus": { angel: "🚦", good: "🛤️", normal: "🔀", bad: "⚠️", harsh: "💥" },
+  "sherlock-gaslighter": { angel: "🕵️", good: "🔍", normal: "📋", bad: "🌫️", harsh: "⚡" },
 };
 
 export type EditorialStepOptionSet = {
