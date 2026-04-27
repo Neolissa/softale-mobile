@@ -8,7 +8,6 @@ import { seasonalEventMvp, type CampaignContentId, type SeasonalEventStep } from
 import {
   getCampaignBlockArc,
   getStageIdxLinear,
-  resolveNpcReactionLine,
   stepLibraryByCampaign,
 } from "./stepLibrary";
 import npcReactionsPrebuilt from "./content/npc-reactions/all.json";
@@ -18,6 +17,16 @@ const NPC_REACTIONS_FROM_BUILD = npcReactionsPrebuilt as NpcReactionsPrebuiltMap
 
 function pickBuiltNpcReaction(campaign: CampaignContentId, stepIdx: number, optionIdx: number): string | undefined {
   return NPC_REACTIONS_FROM_BUILD[campaign]?.[String(stepIdx)]?.[String(optionIdx)];
+}
+
+function requireBuiltNpcReaction(campaign: CampaignContentId, stepIdx: number, optionIdx: number): string {
+  const value = pickBuiltNpcReaction(campaign, stepIdx, optionIdx);
+  if (!value?.trim()) {
+    throw new Error(
+      `[App] Нет собранной реакции NPC в content/npc-reactions/all.json для ${campaign} шаг ${stepIdx + 1} вариант ${optionIdx + 1}`
+    );
+  }
+  return value;
 }
 import { economyApi, type EconomySnapshot } from "./economyApi";
 import { authApi } from "./authApi";
@@ -3265,6 +3274,9 @@ function buildLitRpgCampaign(campaign: CampaignId, questions: QuestDifficulty): 
   }
   const branchOrder: BranchId[] = ["strategist", "empath", "boundary", "challenger", "architect"];
   const steps = entries.map((entry, idx) => {
+    if (!entry.scene?.trim() || !entry.instruction?.trim() || !entry.options?.every((opt) => opt?.trim())) {
+      throw new Error(`[App] Неполный шаг в stepLibraryByCampaign: ${campaign} #${idx + 1}`);
+    }
     const branchEffects: Record<number, BranchId> = {
       0: entry.branchEffectsByOption[0],
       1: entry.branchEffectsByOption[1],
@@ -3274,19 +3286,16 @@ function buildLitRpgCampaign(campaign: CampaignId, questions: QuestDifficulty): 
     };
     const optionNpcReactionByIndex: Record<number, string> = {};
     for (let o = 0; o < 5; o += 1) {
-      const branch = entry.branchEffectsByOption[o];
-      optionNpcReactionByIndex[o] =
-        pickBuiltNpcReaction(cid, idx, o) ?? resolveNpcReactionLine(campaign, idx, o, branch, entry.opponentName);
+      optionNpcReactionByIndex[o] = requireBuiltNpcReaction(cid, idx, o);
     }
     const sceneByBranch = {} as Record<BranchId, string>;
     branchOrder.forEach((b) => {
       const optionIdx = entry.branchEffectsByOption.indexOf(b);
       const o = optionIdx >= 0 ? optionIdx : 0;
-      const reaction =
-        pickBuiltNpcReaction(cid, idx, o) ?? resolveNpcReactionLine(campaign, idx, o, b, entry.opponentName);
+      const reaction = requireBuiltNpcReaction(cid, idx, o);
       sceneByBranch[b] = `${entry.scene}\n\n${reaction}`;
     });
-    const instruction = entry.instruction.trim() || "Контент шага в редактуре: добавьте авторский вопрос.";
+    const instruction = entry.instruction.trim();
     const opponentAvatar = pickOpponentAvatar(entry.opponentEmotion, entry.opponentLine, idx);
     return {
       id: `${campaign}-litrpg-${idx + 1}`,

@@ -247,8 +247,7 @@ function flattenOpponentLines(seed: LongCampaignSeed, scenes: string[], stages: 
     const name = seed.opponents[s % seed.opponents.length];
     const emo = seed.emotions[s % seed.emotions.length];
     const line = seed.toxicLines[i % seed.toxicLines.length];
-    const ctx = scenes[i] ?? "";
-    out.push(`${name} ${emo}: «${line}» — ${ctx}`);
+    out.push(`${name} ${emo}: «${line}»`);
   }
   return out;
 }
