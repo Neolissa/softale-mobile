@@ -18,6 +18,8 @@ services:
         generateValue: true
       - key: DATA_DIR
         value: /var/data
+      - key: DB_BACKUP_KEEP
+        value: "60"
     disk:
       name: softale-backend-data
       mountPath: /var/data

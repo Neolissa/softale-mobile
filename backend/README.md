@@ -65,8 +65,34 @@
 - `RUSTORE_WEBHOOK_SECRET`
 - `YOOKASSA_WEBHOOK_SECRET`
 - `DATA_DIR` (default `backend/data`, в production рекомендуем persistent path вроде `/var/data`)
+- `STRICT_PERSISTENCE_MODE` (`true|false`): опциональный строгий режим проверки хранилища (по умолчанию выключен).
+  - Не включайте его без отдельного окна на проверку инфраструктуры.
+
+### Анти-потеря БД (обязательно для production)
+
+- Используйте persistent disk и `DATA_DIR=/var/data`.
+- Проверяйте `/health`: теперь там есть `strictPersistenceMode`, `dataDir`, `dbPath`.
+- В strict-режиме сервер может не стартовать, если:
+  - `DATA_DIR` не задан явно;
+  - `db.json` отсутствует и нет backup в `DATA_DIR/backups`.
+- Базовый production-режим остаётся без fail-fast: сервис продолжает работать, но пишет явную ошибку в лог, если не нашёл БД/backup.
 
 ### Важно по идемпотентности
 
 - Для операций кошелька поддержан `x-idempotency-key`.
 - Для webhooks проводится проверка подписи `x-signature` (HMAC SHA256).
+
+## GitHub backup db.json (страховка)
+
+- В backend добавлен admin endpoint: `GET /v1/admin/db/export` (только для `ADMIN` токена).
+- В репозитории есть workflow: `.github/workflows/backup-db.yml`.
+- Он запускается каждый час и вручную (`Run workflow`), забирает snapshot БД и пишет:
+  - `backups/db-snapshots/latest/db.json`
+  - `backups/db-snapshots/latest/meta.json`
+  - историю в `backups/db-snapshots/history/db-*.json`
+
+### Нужно добавить GitHub Secrets
+
+- `BACKEND_BASE_URL` (например `https://softale-mobile.onrender.com`)
+- `BACKEND_ADMIN_EMAIL`
+- `BACKEND_ADMIN_PASSWORD`

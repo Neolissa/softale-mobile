@@ -7,6 +7,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 
 const PORT = Number(process.env.PORT || 3000);
+const NODE_ENV = String(process.env.NODE_ENV || "development").toLowerCase();
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const RUSTORE_WEBHOOK_SECRET = process.env.RUSTORE_WEBHOOK_SECRET || "dev-rustore-secret";
 const YOOKASSA_WEBHOOK_SECRET = process.env.YOOKASSA_WEBHOOK_SECRET || "dev-yookassa-secret";
@@ -33,11 +34,33 @@ const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const LEGACY_DB_PATH = path.join(LEGACY_LOCAL_DATA_DIR, "db.json");
 const DB_BACKUP_KEEP = Number(process.env.DB_BACKUP_KEEP || 30);
+const PRODUCTION_NODE_ENVS = new Set(["production", "prod"]);
+const STRICT_PERSISTENCE_MODE =
+  String(process.env.STRICT_PERSISTENCE_MODE || "").trim().toLowerCase() === "true";
 const nowIso = () => new Date().toISOString();
 const EMPATHY_PASS_QUESTIONS_COUNT = 10;
 const EMPATHY_ANSWER_MIN = 0;
 const EMPATHY_ANSWER_MAX = 4;
 const EMPATHY_EVENT_ID = "pair-empathy-quest";
+
+function validatePersistentStorageConfig() {
+  if (!STRICT_PERSISTENCE_MODE) {
+    return;
+  }
+  const envDir = String(process.env.DATA_DIR || "").trim();
+  if (!envDir) {
+    throw new Error(
+      "[softale-backend] STRICT_PERSISTENCE_MODE: DATA_DIR is required. Refusing to run with implicit local storage."
+    );
+  }
+  const resolvedEnvDir = path.resolve(envDir);
+  const resolvedLegacyDir = path.resolve(LEGACY_LOCAL_DATA_DIR);
+  if (resolvedEnvDir === resolvedLegacyDir) {
+    throw new Error(
+      `[softale-backend] STRICT_PERSISTENCE_MODE: DATA_DIR points to legacy path (${resolvedLegacyDir}). Use a persistent mount.`
+    );
+  }
+}
 
 function listBackupFiles() {
   if (!fs.existsSync(BACKUP_DIR)) {
@@ -73,6 +96,7 @@ function restoreDbFromLatestBackup(reason = "unknown") {
 }
 
 function ensureDb() {
+  validatePersistentStorageConfig();
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -96,6 +120,11 @@ function ensureDb() {
     const restored = restoreDbFromLatestBackup("db_missing");
     if (restored) {
       return;
+    }
+    if (PRODUCTION_NODE_ENVS.has(NODE_ENV)) {
+      console.error(
+        `[softale-backend] db is missing at ${DB_PATH} and no backup found in ${BACKUP_DIR}. Bootstrapping empty db as last resort.`
+      );
     }
     const seed = {
       users: {},
@@ -457,7 +486,14 @@ const uploadAvatar = multer({
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, at: nowIso(), dataDir: DATA_DIR, dbPath: DB_PATH });
+  res.json({
+    ok: true,
+    at: nowIso(),
+    nodeEnv: NODE_ENV,
+    strictPersistenceMode: STRICT_PERSISTENCE_MODE,
+    dataDir: DATA_DIR,
+    dbPath: DB_PATH
+  });
 });
 
 app.post("/v1/auth/register", (req, res) => {
@@ -832,6 +868,7 @@ app.get("/v1/admin/metrics", (req, res) => {
       return {
         email: user.email,
         role: user.role,
+        firstSeenAt: user.createdAt || user.updatedAt || null,
         lastSeenAt: user.updatedAt || user.createdAt || null,
         wallet: {
           xp: user.wallet?.xp ?? 0,
@@ -924,6 +961,18 @@ app.get("/v1/admin/metrics", (req, res) => {
     },
     recentCriticalEvents,
     perUser
+  });
+});
+
+app.get("/v1/admin/db/export", (req, res) => {
+  const db = readDb();
+  const admin = requireAdmin(req, res, db);
+  if (!admin) return;
+
+  return res.json({
+    exportedAt: nowIso(),
+    exportedBy: admin.email,
+    db,
   });
 });
 

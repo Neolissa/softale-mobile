@@ -47,6 +47,7 @@ export type AdminMetricsResponse = {
   perUser: Array<{
     email: string;
     role: string;
+    firstSeenAt: string | null;
     lastSeenAt: string | null;
     wallet: { xp: number; energy: number };
     profile: {

@@ -5129,6 +5129,7 @@ export default function App() {
         const nextAdminUsers: AdminUserView[] = metrics.perUser.map((user) => {
           const seedIso = user.lastSeenAt ?? new Date().toISOString();
           const analytics = buildDefaultAnalytics(seedIso);
+          analytics.firstSeenAt = user.firstSeenAt ?? analytics.firstSeenAt;
           analytics.lastSeenAt = user.lastSeenAt ?? analytics.lastSeenAt;
           analytics.totalSessions = user.countersAll.sessions;
           analytics.counters.questStarts = user.countersAll.questStarts;
