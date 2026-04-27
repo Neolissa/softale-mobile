@@ -146,6 +146,19 @@ export function resolveNpcReactionLine(
   branch: BranchId,
   opponentName: string
 ): string {
+  const normalizeTonePrefixByOption = (line: string, idx: number) => {
+    const clean = line.replace(/^\([^)]*\)\s*/, "").trim();
+    const tonePrefixByOption = [
+      "(резко, с отторжением)",
+      "(настороженно)",
+      "(с напряжением)",
+      "(ровнее, принимая аргумент)",
+      "(с уважением и принятием)",
+    ] as const;
+    const safeIdx = Math.max(0, Math.min(tonePrefixByOption.length - 1, idx));
+    return `${tonePrefixByOption[safeIdx]} ${clean}`.trim();
+  };
+
   const overrideLine = reactionOverridesByCampaignStep[campaign as CampaignContentId]?.[globalStepIdx]?.[optionIdx];
   if (overrideLine) {
     return overrideLine;
@@ -155,7 +168,7 @@ export function resolveNpcReactionLine(
     throw new Error(`[stepLibrary] Нет пула реакций для кампании "${campaign}" и ветки "${branch}"`);
   }
   const pick = pool[(globalStepIdx * 7 + optionIdx * 3 + campaign.length) % pool.length];
-  return `${opponentName.trim()}: ${pick}`;
+  return `${opponentName.trim()}: ${normalizeTonePrefixByOption(pick, optionIdx)}`;
 }
 
 function editorialFor(campaign: CampaignContentId) {
