@@ -4518,6 +4518,22 @@ function sanitizeAvatarUri(value: unknown): string | null {
   if (!trimmed) {
     return null;
   }
+  if (/^https?:\/\//i.test(trimmed) || /^data:/i.test(trimmed) || /^file:/i.test(trimmed) || /^blob:/i.test(trimmed)) {
+    return trimmed.slice(0, 2000);
+  }
+
+  // Backend can store avatar path as "/uploads/..." or "uploads/...".
+  // Convert it to absolute URL so Image can render it after re-login.
+  const configuredBase = (process.env.EXPO_PUBLIC_ECONOMY_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  if (configuredBase && /^https?:\/\//i.test(configuredBase)) {
+    if (trimmed.startsWith("/")) {
+      return `${configuredBase}${trimmed}`.slice(0, 2000);
+    }
+    if (trimmed.startsWith("uploads/")) {
+      return `${configuredBase}/${trimmed}`.slice(0, 2000);
+    }
+  }
+
   return trimmed.slice(0, 2000);
 }
 
