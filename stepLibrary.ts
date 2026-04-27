@@ -5,7 +5,7 @@
  */
 import { editorialStepOptionsByCampaign, manualInstructionByCampaign, manualOpponentLineByCampaign } from "./scenarioBible";
 import type { ScenarioCampaignId } from "./scenarioBible";
-import { reactionOverridesByCampaignStep, reactionPoolsByCampaign } from "./reactionPoolsByCampaign";
+import { reactionOverridesByCampaignStep } from "./reactionPoolsByCampaign";
 import {
   longCampaignSeeds,
   questContentByCampaign,
@@ -146,29 +146,53 @@ export function resolveNpcReactionLine(
   branch: BranchId,
   opponentName: string
 ): string {
-  const normalizeTonePrefixByOption = (line: string, idx: number) => {
-    const clean = line.replace(/^\([^)]*\)\s*/, "").trim();
-    const tonePrefixByOption = [
-      "(резко, с отторжением)",
-      "(настороженно)",
-      "(с напряжением)",
-      "(ровнее, принимая аргумент)",
-      "(с уважением и принятием)",
-    ] as const;
-    const safeIdx = Math.max(0, Math.min(tonePrefixByOption.length - 1, idx));
-    return `${tonePrefixByOption[safeIdx]} ${clean}`.trim();
-  };
-
   const overrideLine = reactionOverridesByCampaignStep[campaign as CampaignContentId]?.[globalStepIdx]?.[optionIdx];
   if (overrideLine) {
     return overrideLine;
   }
-  const pool = reactionPoolsByCampaign[campaign as CampaignContentId]?.[branch];
-  if (!pool?.length) {
-    throw new Error(`[stepLibrary] Нет пула реакций для кампании "${campaign}" и ветки "${branch}"`);
-  }
-  const pick = pool[(globalStepIdx * 7 + optionIdx * 3 + campaign.length) % pool.length];
-  return `${opponentName.trim()}: ${normalizeTonePrefixByOption(pick, optionIdx)}`;
+
+  // Жесткий маппинг: optionIdx (код ответа) задает тон реакции.
+  // 0/1/2 — отрицательная динамика, 3/4 — принятие и конструктив.
+  const toneMatrixByBranch: Record<BranchId, [string, string, string, string, string]> = {
+    strategist: [
+      "(резко, с отторжением) «Сухие схемы не спасут. Ты теряешь живой контекст».",
+      "(настороженно) «План звучит аккуратно, но пока не убеждает».",
+      "(с напряжением) «Логика есть, но мне все еще тревожно в этом темпе».",
+      "(ровнее, принимая аргумент) «Окей, структура помогает. Продолжай по шагам».",
+      "(с уважением и принятием) «Сильный ход: ясно, по фактам и без лишнего шума».",
+    ],
+    empath: [
+      "(резко, с отторжением) «Не прикрывайся заботой — это звучит как давление».",
+      "(настороженно) «Слышу тебя, но пока не чувствую безопасности».",
+      "(с напряжением) «Тон мягче, но внутри все еще много сопротивления».",
+      "(ровнее, принимая аргумент) «Так лучше. Я могу это услышать без защиты».",
+      "(с уважением и принятием) «Спасибо за бережность. С таким тоном реально идти дальше».",
+    ],
+    boundary: [
+      "(резко, с отторжением) «Это уже перегиб. В таком формате я не готов(а) продолжать».",
+      "(настороженно) «Границу обозначила, но я пока на дистанции».",
+      "(с напряжением) «Рамка есть, однако доверие еще не восстановилось».",
+      "(ровнее, принимая аргумент) «Окей, граница звучит честно и без удара».",
+      "(с уважением и принятием) «Принято. Четкая граница здесь как раз уместна».",
+    ],
+    challenger: [
+      "(резко, с отторжением) «Это не вызов, а эскалация ради конфликта».",
+      "(настороженно) «Прямо, но пока слишком жестко для диалога».",
+      "(с напряжением) «Смелый ход, только держи контроль, а не давление».",
+      "(ровнее, принимая аргумент) «Ого. Прямо. Ладно, отвечу по сути».",
+      "(с уважением и принятием) «Сильный прорыв: жестко к проблеме, но без разрушения контакта».",
+    ],
+    architect: [
+      "(резко, с отторжением) «Сейчас это похоже на бюрократию вместо решения».",
+      "(настороженно) «Правила полезны, но не уверена, что они сработают вживую».",
+      "(с напряжением) «Каркас есть, однако система пока хрупкая».",
+      "(ровнее, принимая аргумент) «Окей, так уже похоже на рабочий процесс».",
+      "(с уважением и принятием) «Отлично. Это решение можно закреплять как новую норму».",
+    ],
+  };
+  const toneRows = toneMatrixByBranch[branch] ?? toneMatrixByBranch.strategist;
+  const safeIdx = Math.max(0, Math.min(4, optionIdx));
+  return `${opponentName.trim()}: ${toneRows[safeIdx]}`;
 }
 
 function editorialFor(campaign: CampaignContentId) {
