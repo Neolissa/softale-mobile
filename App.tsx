@@ -379,7 +379,7 @@ const ENERGY_REFERRAL_BONUS = 60;
 const ENERGY_REACTIVATION_7D_BONUS = 70;
 const ENERGY_REACTIVATION_14D_BONUS = 120;
 const ENERGY_REACTIVATION_30D_BONUS = 220;
-const FREE_STAGES_PER_CAMPAIGN = 3;
+const FREE_STAGES_PER_CAMPAIGN = 1;
 const ENERGY_TRANSFER_MIN = 10;
 const ENERGY_TRANSFER_DAILY_LIMIT = 50;
 const ENERGY_TRANSFER_WEEKLY_LIMIT = 200;
@@ -4525,6 +4525,12 @@ function sanitizeAvatarUri(value: unknown): string | null {
   if (!trimmed) {
     return null;
   }
+  // Legacy guard: blob URLs on web are session-scoped and break after re-login.
+  // Keep only stable URI schemes for persisted profile data.
+  if (Platform.OS === "web" && /^blob:/i.test(trimmed)) {
+    return null;
+  }
+
   if (/^https?:\/\//i.test(trimmed) || /^data:/i.test(trimmed) || /^file:/i.test(trimmed) || /^blob:/i.test(trimmed)) {
     return trimmed.slice(0, 2000);
   }
@@ -9696,9 +9702,7 @@ export default function App() {
               <Text style={styles.cardMeta}>{dailyClaimCountdownLabel}</Text>
               <Text style={styles.cardTitle}>XP и энергия</Text>
               <Text style={styles.cardText}>XP: {animatedXp} • Энергия: {animatedEnergy}</Text>
-              <Text style={styles.cardMeta}>
-                Первые {FREE_STAGES_PER_CAMPAIGN} этапа в квесте бесплатны, дальше — {currentStageCost} энергии за этап.
-              </Text>
+              <Text style={styles.cardMeta}>Первый этап в квесте бесплатный, со второго — {currentStageCost} энергии за этап.</Text>
               <View style={styles.profileEconomyActionStack}>
                 <AppButton
                   label="Пополнить (RuStore Wallet) +120"
