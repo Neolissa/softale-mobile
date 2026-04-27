@@ -2743,15 +2743,15 @@ type LongCampaignSeed = {
   title: string;
   setting: string;
   tone: string;
-  arcTextByStage: [string, string, string, string, string];
-  opponents: [string, string, string, string, string];
-  emotions: [string, string, string, string, string];
-  toxicLines: [string, string, string, string, string];
-  emojiByStage: [string, string, string, string, string];
-  hintByStage: [string, string, string, string, string];
+  arcTextByStage: string[];
+  opponents: string[];
+  emotions: string[];
+  toxicLines: string[];
+  emojiByStage: string[];
+  hintByStage: string[];
   turnsPerStage?: number;
-  stageSituationsByStage?: [string[], string[], string[], string[], string[]];
-  decisionPromptTemplatesByStage?: [string[], string[], string[], string[], string[]];
+  stageSituationsByStage?: string[][];
+  decisionPromptTemplatesByStage?: string[][];
 };
 
 const longCampaignSeeds: LongCampaignSeed[] = [
@@ -3506,7 +3506,7 @@ const longCampaignSeeds: LongCampaignSeed[] = [
 ];
 
 function buildLongCampaign(seed: LongCampaignSeed): QuestCampaignContent {
-  const defaultStageSituations: [string[], string[], string[], string[], string[]] = [
+  const defaultStageSituations: string[][] = [
     [
       "Перед стартом общего решения ты предлагаешь зафиксировать рамку разговора.",
       "На первом собрании ты просишь обсуждать критерии, а не личности.",
@@ -3543,60 +3543,67 @@ function buildLongCampaign(seed: LongCampaignSeed): QuestCampaignContent {
       "В развязке ты закрепляешь правила, по которым команда будет жить дальше.",
     ],
   ];
-  const defaultDecisionPromptTemplates: [string[], string[], string[], string[], string[]] = [
+  const defaultDecisionPromptTemplates: string[][] = [
     [
       "Как отвечаешь, чтобы задать здоровую рамку разговора с первого хода?",
       "Что скажешь, чтобы сохранить контакт и не отдать контроль?",
       "Какой первый ответ сразу снижает риск эскалации?",
+      "Что выберешь в этом узле, чтобы не отдать инициативу давлению?",
+      "Как удержишь курс сцены без резкости и без капитуляции?",
     ],
     [
       "Как отвечаешь под давлением, чтобы не потерять позицию?",
       "Что выберешь, чтобы напряжение не сломало результат?",
       "Какой ответ держит и границы, и рабочий темп?",
+      "Что скажешь, чтобы сохранить результат и не потерять себя?",
+      "Какой ход гасит шум и возвращает разговор к сути?",
     ],
     [
       "Какой ход ломает токсичный сценарий, не ломая диалог?",
       "Что скажешь, чтобы остановить манипуляцию и вернуть факты?",
       "Как отвечаешь в переломе, чтобы не уйти в оправдания или атаку?",
+      "Что выберешь, чтобы развернуть сценарий в сторону зрелого решения?",
+      "Какой ответ оставит опору на факты и границы одновременно?",
     ],
     [
       "Как удержишь инициативу, когда ставки уже высокие?",
       "Какой ответ не даст конфликту сорваться в личную войну?",
       "Что выбрать, чтобы вывести разговор к взрослой договоренности?",
+      "Какой шаг удержит контакт, когда давление становится личным?",
+      "Что скажешь сейчас, чтобы не сорваться в старый паттерн?",
     ],
     [
       "Какой финальный ответ закрепит решение и последствия?",
       "Что скажешь, чтобы после развязки система работала устойчиво?",
       "Как завершишь разговор так, чтобы конфликт не вернулся завтра?",
+      "Какой финальный ход делает развязку устойчивой, а не разовой?",
+      "Что закрепишь в финале, чтобы система не откатилась после сцены?",
     ],
   ];
-  const stageSituations = seed.stageSituationsByStage ?? defaultStageSituations;
-  const decisionPromptTemplates = seed.decisionPromptTemplatesByStage ?? defaultDecisionPromptTemplates;
-  const turnsPerStage = Number.isFinite(seed.turnsPerStage) ? Math.max(1, Number(seed.turnsPerStage)) : 25;
+  const stageCount = Math.max(1, seed.arcTextByStage.length);
+  const stageSituations = seed.stageSituationsByStage ?? Array.from({ length: stageCount }, (_, idx) => defaultStageSituations[idx % defaultStageSituations.length]);
+  const decisionPromptTemplates =
+    seed.decisionPromptTemplatesByStage ?? Array.from({ length: stageCount }, (_, idx) => defaultDecisionPromptTemplates[idx % defaultDecisionPromptTemplates.length]);
+  // Ветвление обеспечивается вариантами ответа, а не раздуванием линейного числа шагов.
+  const turnsPerStage = Number.isFinite(seed.turnsPerStage) ? Math.max(1, Number(seed.turnsPerStage)) : 5;
   const blocks = seed.arcTextByStage.map((arcText, stageIdx) => {
     const nodes = Array.from({ length: turnsPerStage }, (_, turnIdx) => {
-      const turn = turnIdx + 1;
       const opponent = seed.opponents[(turnIdx + stageIdx) % seed.opponents.length];
       const emotion = seed.emotions[(turnIdx * 2 + stageIdx) % seed.emotions.length];
       const toxicLine = seed.toxicLines[(turnIdx * 3 + stageIdx) % seed.toxicLines.length];
-      const dispositionLead = stageSituations[stageIdx][(turnIdx + stageIdx) % stageSituations[stageIdx].length];
-      const decisionPrompt = decisionPromptTemplates[stageIdx][(turnIdx * 2 + stageIdx) % decisionPromptTemplates[stageIdx].length];
-
-      const escalationLines = [
-        "и поднимает напряжение в разговоре.",
-        "и делает следующий ход заметно жестче.",
-        "и толкает диалог к более высокой цене ошибки.",
-        "и уводит сцену в более рискованный поворот.",
-        "и добавляет давлению новую остроту.",
-      ] as const;
+      const stageSituationsPool = stageSituations[stageIdx]?.length ? stageSituations[stageIdx] : defaultStageSituations[stageIdx % defaultStageSituations.length];
+      const stagePromptsPool =
+        decisionPromptTemplates[stageIdx]?.length ? decisionPromptTemplates[stageIdx] : defaultDecisionPromptTemplates[stageIdx % defaultDecisionPromptTemplates.length];
+      const dispositionLead = stageSituationsPool[(turnIdx + stageIdx) % stageSituationsPool.length];
+      const decisionPrompt = stagePromptsPool[(turnIdx * 2 + stageIdx) % stagePromptsPool.length];
       return {
-        disposition: `${dispositionLead} ${opponent} ${emotion} ${escalationLines[(turnIdx + stageIdx) % escalationLines.length]}`,
+        disposition: dispositionLead,
         opponentDescription: opponent,
         opponentEmotion: emotion,
         opponentReplica: toxicLine,
         decisionPrompt,
-        emoji: seed.emojiByStage[stageIdx],
-        hint: `${seed.hintByStage[stageIdx]} Выбери ответ, который держит контакт и цель.`,
+        emoji: seed.emojiByStage[stageIdx] ?? seed.emojiByStage[seed.emojiByStage.length - 1] ?? "🎯",
+        hint: seed.hintByStage[stageIdx] ?? seed.hintByStage[seed.hintByStage.length - 1] ?? "Держи курс на ясность, границы и следующий шаг.",
       } satisfies QuestNarrativeNode;
     });
 
