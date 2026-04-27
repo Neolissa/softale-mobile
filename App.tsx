@@ -34,6 +34,7 @@ import { analyticsApi, type AdminMetricsResponse } from "./analyticsApi";
 import { empathyApi, type EmpathyPairView, type EmpathyPassType } from "./empathyApi";
 import { achievementEmojiByCampaignTier, editorialEndingByCampaignTier, editorialStepOptionsByCampaign } from "./scenarioBible";
 import {
+  Alert,
   ActivityIndicator,
   Animated,
   Easing,
@@ -4542,6 +4543,30 @@ function sanitizeAvatarUri(value: unknown): string | null {
   return trimmed.slice(0, 2000);
 }
 
+async function makePersistableAvatarUri(rawUri: string): Promise<string> {
+  const normalized = rawUri.trim();
+  if (!normalized) {
+    return rawUri;
+  }
+  // On web, blob: URLs are session-scoped and break after re-login/reload.
+  // Convert them to data: URLs so local auth mode can persist avatar reliably.
+  if (Platform.OS === "web" && normalized.startsWith("blob:")) {
+    try {
+      const blob = await fetch(normalized).then((response) => response.blob());
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : normalized);
+        reader.onerror = () => reject(new Error("avatar_blob_to_data_failed"));
+        reader.readAsDataURL(blob);
+      });
+      return dataUrl;
+    } catch {
+      return rawUri;
+    }
+  }
+  return rawUri;
+}
+
 function buildDefaultProfile(): UserProfile {
   return {
     displayName: "Герой леса",
@@ -6741,7 +6766,8 @@ export default function App() {
       return;
     }
     const localAvatarUri = result.assets[0].uri;
-    setAvatarUri(localAvatarUri);
+    const persistentAvatarUri = await makePersistableAvatarUri(localAvatarUri);
+    setAvatarUri(sanitizeAvatarUri(persistentAvatarUri));
     setProfileSetupDone(true);
     if (isServerAuth && currentUserEmail) {
       try {
@@ -6789,7 +6815,8 @@ export default function App() {
     if (result.canceled || !result.assets.length) {
       return;
     }
-    setAuthAvatarUri(result.assets[0].uri);
+    const persistentAvatarUri = await makePersistableAvatarUri(result.assets[0].uri);
+    setAuthAvatarUri(sanitizeAvatarUri(persistentAvatarUri));
     setAuthError("");
   };
 
@@ -7428,6 +7455,96 @@ export default function App() {
   const filteredAdminUsers = adminUsers.filter((user) =>
     user.email.toLowerCase().includes(adminUserSearch.trim().toLowerCase())
   );
+  const analyticsEventLabelRu: Partial<Record<AnalyticsEventType, string>> = {
+    session_start: "Старт сессии",
+    session_end: "Завершение сессии",
+    auth_register: "Регистрация",
+    auth_login: "Вход в аккаунт",
+    tab_view: "Открытие раздела",
+    diagnostic_answer: "Ответ в диагностике",
+    diagnostic_complete: "Диагностика завершена",
+    course_start: "Старт курса",
+    course_complete: "Курс завершен",
+    quest_start: "Старт квеста",
+    quest_complete: "Квест завершен",
+    step_pass: "Шаг пройден",
+    step_fail: "Ошибка шага",
+    penalty_applied: "Применен штраф",
+    hint_opened: "Открыта подсказка",
+    drop_off: "Отвал на сценарии",
+    branch_shift: "Смена тактики",
+    ending_unlock: "Открыт финал",
+    answer_correct: "Верный ответ",
+    answer_incorrect: "Неверный ответ",
+    stage_start: "Старт этапа",
+    stage_complete: "Этап завершен",
+    event_join: "Вступление в ивент",
+    event_step_pass: "Шаг ивента пройден",
+    event_step_fail: "Ошибка в ивенте",
+    event_complete: "Ивент завершен",
+    event_reward_claim: "Награда ивента получена",
+  };
+  const getAnalyticsEventLabelRu = (type: string) => {
+    return analyticsEventLabelRu[type as AnalyticsEventType] ?? type.replace(/_/g, " ");
+  };
+  const adminChartLegend = [
+    { id: "legend-start", label: "Старты", color: "#60A5FA" },
+    { id: "legend-finish", label: "Финиши", color: "#34D399" },
+    { id: "legend-risk", label: "Ошибки/отказы", color: "#EF4444" },
+    { id: "legend-engagement", label: "Активность", color: "#22D3EE" },
+  ];
+  const renderAdminMiniBars = (
+    rows: Array<{ id: string; label: string; value: number; color?: string }>,
+    emptyLabel = "Нет данных для графика."
+  ) => {
+    if (!rows.length) {
+      return <Text style={styles.cardMeta}>{emptyLabel}</Text>;
+    }
+    const maxValue = Math.max(1, ...rows.map((row) => row.value));
+    return rows.map((row) => {
+      const percent = Math.max(0, Math.min(100, Math.round((row.value / maxValue) * 100)));
+      return (
+        <View key={row.id} style={styles.scaleRow}>
+          <View style={styles.scaleHeader}>
+            <Text style={styles.scaleLabel}>{row.label}</Text>
+            <Text style={styles.scaleValue}>{row.value}</Text>
+          </View>
+          <View style={styles.scaleTrack}>
+            <View style={[styles.scaleFill, { width: `${percent}%`, backgroundColor: row.color ?? colors.accent }]} />
+          </View>
+        </View>
+      );
+    });
+  };
+  const renderAdminSparkline = (events: AnalyticsEvent[], bins = 12) => {
+    if (!events.length) {
+      return <Text style={styles.cardMeta}>Тренд активности пока не сформирован.</Text>;
+    }
+    const hourMs = 60 * 60 * 1000;
+    const now = Date.now();
+    const series = Array.from({ length: bins }, () => 0);
+    events.forEach((event) => {
+      const atMs = Date.parse(event.at);
+      if (!Number.isFinite(atMs)) return;
+      const hoursAgo = Math.floor((now - atMs) / hourMs);
+      if (hoursAgo < 0 || hoursAgo >= bins) return;
+      const idx = bins - 1 - hoursAgo;
+      series[idx] += 1;
+    });
+    const maxValue = Math.max(1, ...series);
+    return (
+      <View style={styles.sparklineWrap}>
+        {series.map((value, idx) => {
+          const height = Math.max(8, Math.round((value / maxValue) * 44));
+          return (
+            <View key={`spark-${idx}`} style={styles.sparklineColumn}>
+              <View style={[styles.sparklineBar, { height, opacity: value > 0 ? 0.95 : 0.35 }]} />
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
   const visibleTabs = tabs.filter((tab) => (tab.key === "admin" ? currentUserRole === "ADMIN" : true));
   const currentStageCost = Math.min(28, 12 + Math.max(0, completedCount - 1) * 2);
   const storyRatingLabel = (storyId: QuestStory) => {
@@ -9820,6 +9937,17 @@ export default function App() {
               {!!adminActionMessage && <Text style={styles.authSuccess}>{adminActionMessage}</Text>}
               <AppButton label="Обновить аналитику" variant="secondary" onPress={() => refreshAnalyticsSnapshot()} />
             </AppCard>
+            <AppCard>
+              <Text style={styles.sectionLabel}>Легенда графиков</Text>
+              <View style={styles.adminLegendRow}>
+                {adminChartLegend.map((item) => (
+                  <View key={item.id} style={styles.adminLegendItem}>
+                    <View style={[styles.adminLegendDot, { backgroundColor: item.color }]} />
+                    <Text style={styles.cardMeta}>{item.label}</Text>
+                  </View>
+                ))}
+              </View>
+            </AppCard>
 
             {isServerAuth && (
               <AppCard>
@@ -9846,18 +9974,64 @@ export default function App() {
                       Курсы: старт {serverAdminMetrics.funnel24h.courseStarts} → финиш {serverAdminMetrics.funnel24h.courseCompletions} (
                       {serverAdminMetrics.funnel24h.courseCompletionRate}%)
                     </Text>
+                    {renderAdminMiniBars([
+                      {
+                        id: "srv-funnel-quest-start",
+                        label: "Квесты: старт",
+                        value: serverAdminMetrics.funnel24h.questStarts,
+                        color: "#60A5FA",
+                      },
+                      {
+                        id: "srv-funnel-quest-finish",
+                        label: "Квесты: финиш",
+                        value: serverAdminMetrics.funnel24h.questCompletions,
+                        color: "#34D399",
+                      },
+                      {
+                        id: "srv-funnel-course-start",
+                        label: "Курсы: старт",
+                        value: serverAdminMetrics.funnel24h.courseStarts,
+                        color: "#A78BFA",
+                      },
+                      {
+                        id: "srv-funnel-course-finish",
+                        label: "Курсы: финиш",
+                        value: serverAdminMetrics.funnel24h.courseCompletions,
+                        color: "#F59E0B",
+                      },
+                    ])}
                     <Text style={styles.sectionLabel}>Ошибки и отказы 24ч</Text>
                     <Text style={styles.cardMeta}>
                       Отказы: {serverAdminMetrics.quality24h.dropOffs} • Step fail: {serverAdminMetrics.quality24h.stepFails} • Штрафы:{" "}
                       {serverAdminMetrics.quality24h.penalties}
                     </Text>
                     <Text style={styles.cardMeta}>Неверных ответов: {serverAdminMetrics.quality24h.answerIncorrect}</Text>
+                    {renderAdminMiniBars([
+                      { id: "srv-quality-dropoff", label: "Drop-off", value: serverAdminMetrics.quality24h.dropOffs, color: "#F97316" },
+                      { id: "srv-quality-fails", label: "Step fail", value: serverAdminMetrics.quality24h.stepFails, color: "#EF4444" },
+                      { id: "srv-quality-penalties", label: "Штрафы", value: serverAdminMetrics.quality24h.penalties, color: "#F43F5E" },
+                      {
+                        id: "srv-quality-wrong",
+                        label: "Неверные ответы",
+                        value: serverAdminMetrics.quality24h.answerIncorrect,
+                        color: "#FB7185",
+                      },
+                    ])}
                     {serverAdminMetrics.quality24h.topErrorTypes.slice(0, 5).map((item) => (
                       <Text key={`srv-err-${item.errorType}`} style={styles.cardMeta}>
                         • {formatErrorTypeLabelRu(item.errorType)}: {item.count}
                       </Text>
                     ))}
                     <Text style={styles.sectionLabel}>Просмотры табов 24ч</Text>
+                    {renderAdminMiniBars(
+                      serverAdminMetrics.engagement24h.topTabs.slice(0, 5).map((item, idx) => ({
+                        id: `srv-tabs-${item.tab}`,
+                        label: item.tab,
+                        value: item.views,
+                        color: idx % 2 === 0 ? "#22D3EE" : "#38BDF8",
+                      })),
+                      "Просмотров табов за 24ч пока нет."
+                    )}
                     {serverAdminMetrics.engagement24h.topTabs.slice(0, 5).map((item) => (
                       <Text key={`srv-tab-${item.tab}`} style={styles.cardMeta}>
                         • {item.tab}: {item.views}
@@ -9934,6 +10108,47 @@ export default function App() {
                         {data.events.filter((event) => event.type === "ending_unlock").length}
                       </Text>
                       <Text style={styles.cardMeta}>Ответов в диагностике: {testAnswers}</Text>
+                      <Text style={styles.sectionLabel}>Тренд активности (последние часы)</Text>
+                      {renderAdminSparkline(data.events, 16)}
+                      <Text style={styles.sectionLabel}>Визуальный срез пользователя</Text>
+                      {renderAdminMiniBars([
+                        {
+                          id: `${email}-quest-start`,
+                          label: "Квесты: старт",
+                          value: data.counters.questStarts,
+                          color: "#60A5FA",
+                        },
+                        {
+                          id: `${email}-quest-finish`,
+                          label: "Квесты: финиш",
+                          value: data.counters.questCompletions,
+                          color: "#34D399",
+                        },
+                        {
+                          id: `${email}-course-start`,
+                          label: "Курсы: старт",
+                          value: data.counters.courseStarts,
+                          color: "#A78BFA",
+                        },
+                        {
+                          id: `${email}-course-finish`,
+                          label: "Курсы: финиш",
+                          value: data.counters.courseCompletions,
+                          color: "#F59E0B",
+                        },
+                        {
+                          id: `${email}-fails`,
+                          label: "Ошибки",
+                          value: data.counters.stepFails,
+                          color: "#EF4444",
+                        },
+                        {
+                          id: `${email}-dropoff`,
+                          label: "Отказы",
+                          value: data.counters.dropOffs,
+                          color: "#F97316",
+                        },
+                      ])}
                       <Text style={styles.sectionLabel}>Ошибки по типам (включая прощенные)</Text>
                       {Object.entries(data.answerByErrorType ?? {})
                         .sort((a, b) => b[1] - a[1])
@@ -9970,9 +10185,20 @@ export default function App() {
                       <Text style={styles.sectionLabel}>Последние события</Text>
                       {recentEvents.length ? (
                         recentEvents.map((event) => (
-                          <Text key={event.id} style={styles.cardMeta}>
-                            • {event.type} — {new Date(event.at).toLocaleTimeString()} {event.details ? `(${event.details})` : ""}
-                          </Text>
+                          <Pressable
+                            key={event.id}
+                            onPress={() =>
+                              Alert.alert(
+                                "Системное имя события",
+                                `raw event type: ${event.type}\n\nЭто техническое имя для аналитики и backend-функций.`
+                              )
+                            }
+                          >
+                            <Text style={styles.cardMeta}>
+                              • {getAnalyticsEventLabelRu(event.type)} — {new Date(event.at).toLocaleTimeString()}{" "}
+                              {event.details ? `(${event.details})` : ""}
+                            </Text>
+                          </Pressable>
                         ))
                       ) : (
                         <Text style={styles.cardMeta}>Событий пока нет.</Text>
@@ -10693,6 +10919,52 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
+  },
+  adminLegendRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 4,
+  },
+  adminLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  adminLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  sparklineWrap: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 3,
+    height: 52,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: theme.radius.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
+  sparklineColumn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    height: "100%",
+  },
+  sparklineBar: {
+    width: "100%",
+    maxWidth: 8,
+    borderRadius: 999,
+    backgroundColor: "#22D3EE",
   },
   storyPreviewTapArea: {
     gap: 8,
