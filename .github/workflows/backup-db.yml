@@ -1,0 +1,41 @@
+name: Backup Backend DB To GitHub
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  backup-db:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch DB snapshot from backend
+        env:
+          BACKEND_BASE_URL: ${{ secrets.BACKEND_BASE_URL }}
+          BACKEND_ADMIN_EMAIL: ${{ secrets.BACKEND_ADMIN_EMAIL }}
+          BACKEND_ADMIN_PASSWORD: ${{ secrets.BACKEND_ADMIN_PASSWORD }}
+          DB_BACKUP_HISTORY_KEEP: "120"
+        run: node ./scripts/backup-db-from-backend.mjs
+
+      - name: Commit backup if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backups/db-snapshots
+          if git diff --cached --quiet; then
+            echo "No backup changes."
+            exit 0
+          fi
+          git commit -m "chore: update backend db snapshot"
+          git push

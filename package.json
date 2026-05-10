@@ -23,7 +23,8 @@
     "content:duplicates": "tsx ./scripts/content-duplicates-report.ts",
     "content:scene-dialogue": "tsx ./scripts/content-scene-dialogue-duplicates-report.ts",
     "build:npc-reactions": "tsx ./scripts/build-npc-reactions.ts",
-    "prepush:check": "npm run content:audit && npm run web:build",
+    "prepush:db": "node ./scripts/backup-db-from-backend.mjs",
+    "prepush:check": "npm run prepush:db && npm run content:audit && npm run web:build",
     "prepare": "husky"
   },
   "dependencies": {

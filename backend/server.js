@@ -385,6 +385,29 @@ function percentMatch(a, b) {
   return Math.round((matches / a.length) * 100);
 }
 
+function normalizeAnalyticsToken(value, fallback = "unknown") {
+  const normalized = String(value ?? "").trim();
+  return normalized ? normalized.slice(0, 120) : fallback;
+}
+
+function parseAnalyticsDetails(details) {
+  if (typeof details === "string") {
+    const errorType = details.match(/type:([^;]+)/)?.[1]?.trim() ?? null;
+    const tactic = details.match(/tactic:([^;]+)/)?.[1]?.trim() ?? null;
+    return { errorType, tactic };
+  }
+  if (details && typeof details === "object") {
+    const source = details;
+    const errorType = source.errorType ?? source.type ?? null;
+    const tactic = source.tactic ?? null;
+    return {
+      errorType: typeof errorType === "string" ? errorType.trim() : null,
+      tactic: typeof tactic === "string" ? tactic.trim() : null,
+    };
+  }
+  return { errorType: null, tactic: null };
+}
+
 function resolveEmpathyAchievement(overallEmpathyPercent) {
   if (overallEmpathyPercent >= 85) return "Эмпатический резонанс";
   if (overallEmpathyPercent >= 70) return "Точная настройка";
@@ -409,6 +432,12 @@ function buildEmpathyPairView(pair, currentEmail) {
     updatedAt: pair.updatedAt,
     completedAt: pair.completedAt ?? null,
     report: pair.report ?? null,
+    invitation: {
+      inviterEmail: pair.createdBy,
+      inviteeEmail: counterpartEmail,
+      direction: currentEmail === pair.createdBy ? "outgoing" : "incoming",
+      isIncoming: currentEmail !== pair.createdBy,
+    },
     me: {
       selfActualDone: Array.isArray(me.self_actual),
       friendPredictionDone: Array.isArray(me.friend_predicted_by_me),
@@ -440,10 +469,16 @@ function refreshEmpathyPairReport(pair) {
 
   const memberAEmpathyPercent = percentMatch(passesA.friend_predicted_by_me, passesB.self_actual);
   const memberBEmpathyPercent = percentMatch(passesB.friend_predicted_by_me, passesA.self_actual);
+  const matchedAnswersCount = passesA.self_actual.reduce(
+    (acc, value, idx) => (value === passesB.self_actual[idx] ? acc + 1 : acc),
+    0
+  );
   const answersOverlapPercent = percentMatch(passesA.self_actual, passesB.self_actual);
   const overallEmpathyPercent = Math.round((memberAEmpathyPercent + memberBEmpathyPercent) / 2);
   const achievement = resolveEmpathyAchievement(overallEmpathyPercent);
   pair.report = {
+    matchedAnswersCount,
+    totalAnswersCount: passesA.self_actual.length,
     answersOverlapPercent,
     overallEmpathyPercent,
     achievement,
@@ -652,6 +687,16 @@ app.post("/v1/analytics/event", (req, res) => {
   if (!type) {
     return res.status(400).json({ error: "Event type is required" });
   }
+  const rawDetails = req.body.details;
+  const details =
+    typeof rawDetails === "string"
+      ? rawDetails.slice(0, 500)
+      : rawDetails && typeof rawDetails === "object"
+      ? JSON.stringify(rawDetails).slice(0, 500)
+      : undefined;
+  const parsedDetails = parseAnalyticsDetails(rawDetails);
+  const explicitErrorType = typeof req.body.errorType === "string" ? req.body.errorType : parsedDetails.errorType;
+  const explicitTactic = typeof req.body.tactic === "string" ? req.body.tactic : parsedDetails.tactic;
   const event = {
     id: crypto.randomUUID(),
     at: nowIso(),
@@ -663,7 +708,9 @@ app.post("/v1/analytics/event", (req, res) => {
     courseId: typeof req.body.courseId === "string" ? req.body.courseId : undefined,
     difficulty: Number.isFinite(Number(req.body.difficulty)) ? Number(req.body.difficulty) : undefined,
     stepIndex: Number.isFinite(Number(req.body.stepIndex)) ? Number(req.body.stepIndex) : undefined,
-    details: typeof req.body.details === "string" ? req.body.details.slice(0, 500) : undefined
+    details,
+    errorType: explicitErrorType ? normalizeAnalyticsToken(explicitErrorType) : undefined,
+    tactic: explicitTactic ? normalizeAnalyticsToken(explicitTactic) : undefined
   };
   db.analyticsEvents.push(event);
   if (db.analyticsEvents.length > 10000) {
@@ -686,10 +733,6 @@ app.post("/v1/empathy/pairs/invite", (req, res) => {
   if (friendEmail === user.email) {
     return res.status(409).json({ error: "Cannot invite yourself" });
   }
-  if (!db.users[friendEmail]) {
-    return res.status(404).json({ error: "Friend user not found" });
-  }
-
   const existingPair = Object.values(db.empathyPairs).find(
     (pair) =>
       pair &&
@@ -712,6 +755,7 @@ app.post("/v1/empathy/pairs/invite", (req, res) => {
     updatedAt: nowIso(),
     completedAt: null,
     report: null,
+    history: [],
     passes: {
       [user.email]: {
         self_actual: null,
@@ -768,6 +812,17 @@ app.post("/v1/empathy/pairs/:pairId/pass", (req, res) => {
 
   pair.passes[user.email] ??= { self_actual: null, friend_predicted_by_me: null };
   pair.passes[user.email][passType] = answers;
+  pair.history ??= [];
+  pair.history.push({
+    id: crypto.randomUUID(),
+    at: nowIso(),
+    email: user.email,
+    passType,
+    answers,
+  });
+  if (pair.history.length > 100) {
+    pair.history = pair.history.slice(-100);
+  }
   pair.updatedAt = nowIso();
   refreshEmpathyPairReport(pair);
   writeDb(db);
@@ -819,9 +874,10 @@ app.get("/v1/admin/metrics", (req, res) => {
 
   const topErrorTypes = Object.entries(
     events24h.reduce((acc, event) => {
-      if (event.type !== "answer_incorrect" || typeof event.details !== "string") return acc;
-      const match = event.details.match(/type:([^;]+)/);
-      const key = match?.[1]?.trim();
+      if (event.type !== "answer_incorrect") return acc;
+      const key =
+        (typeof event.errorType === "string" && event.errorType.trim()) ||
+        parseAnalyticsDetails(event.details).errorType;
       if (!key) return acc;
       acc[key] = (acc[key] || 0) + 1;
       return acc;
@@ -840,9 +896,10 @@ app.get("/v1/admin/metrics", (req, res) => {
       const byTypeAll = (type) => userEventsAll.filter((event) => event.type === type).length;
       const topErrorTypesAll = Object.entries(
         userEventsAll.reduce((acc, event) => {
-          if (event.type !== "answer_incorrect" || typeof event.details !== "string") return acc;
-          const match = event.details.match(/type:([^;]+)/);
-          const key = match?.[1]?.trim();
+          if (event.type !== "answer_incorrect") return acc;
+          const key =
+            (typeof event.errorType === "string" && event.errorType.trim()) ||
+            parseAnalyticsDetails(event.details).errorType;
           if (!key) return acc;
           acc[key] = (acc[key] || 0) + 1;
           return acc;
@@ -853,9 +910,10 @@ app.get("/v1/admin/metrics", (req, res) => {
         .map(([errorType, count]) => ({ errorType, count }));
       const topTacticsAll = Object.entries(
         userEventsAll.reduce((acc, event) => {
-          if ((event.type !== "answer_correct" && event.type !== "answer_incorrect") || typeof event.details !== "string") return acc;
-          const match = event.details.match(/tactic:([^;]+)/);
-          const key = match?.[1]?.trim();
+          if (event.type !== "answer_correct" && event.type !== "answer_incorrect") return acc;
+          const key =
+            (typeof event.tactic === "string" && event.tactic.trim()) ||
+            parseAnalyticsDetails(event.details).tactic;
           if (!key || key === "n/a") return acc;
           acc[key] = (acc[key] || 0) + 1;
           return acc;

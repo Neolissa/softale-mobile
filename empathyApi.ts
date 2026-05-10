@@ -14,11 +14,19 @@ export type EmpathyPairView = {
   updatedAt: string;
   completedAt: string | null;
   report: {
+    matchedAnswersCount: number;
+    totalAnswersCount: number;
     answersOverlapPercent: number;
     overallEmpathyPercent: number;
     achievement: string;
     perMember: Record<string, { empathyPercent: number }>;
   } | null;
+  invitation: {
+    inviterEmail: string;
+    inviteeEmail: string;
+    direction: "incoming" | "outgoing";
+    isIncoming: boolean;
+  };
   me: {
     selfActualDone: boolean;
     friendPredictionDone: boolean;

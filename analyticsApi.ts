@@ -5,6 +5,8 @@ const AUTH_TOKEN_KEY = "softale_server_token_v1";
 type AnalyticsEventPayload = {
   type: string;
   details?: string;
+  errorType?: string;
+  tactic?: string;
   tab?: string;
   courseId?: string;
   storyId?: string;
