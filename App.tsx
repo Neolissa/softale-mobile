@@ -362,6 +362,12 @@ type CourseConfig = {
   recommendedFor: ConflictStyleId[];
   preferredQuestions: QuestDifficulty;
 };
+type CourseTheoryBlock = {
+  title: string;
+  summary: string;
+  keyPoints: string[];
+  practiceBridge: string;
+};
 
 const AUTH_STORAGE_KEY = "softale_auth_v1";
 const RUNTIME_QUEST_PROGRESS_KEY = "softale_runtime_quest_progress_v1";
@@ -562,6 +568,269 @@ const courses: CourseConfig[] = [
     preferredQuestions: 10,
   },
 ];
+
+const courseTheoryByStage: Record<CourseId, CourseTheoryBlock[]> = {
+  "office-icebreaker": [
+    {
+      title: "Этап 1. Разогрев контакта",
+      summary: "На старте важно не доказать правоту, а создать безопасный канал разговора.",
+      keyPoints: [
+        "Сначала называем общую цель, потом расхождения.",
+        "Убираем обвинительные формулировки и ярлыки.",
+        "Даем короткую рамку: как именно обсуждаем вопрос.",
+      ],
+      practiceBridge: "В практике этапа ты отработаешь первый вход в напряженный диалог без эскалации.",
+    },
+    {
+      title: "Этап 2. Деэскалация под давлением",
+      summary: "Когда тон повышается, лидерство проявляется через структуру, а не через силу голоса.",
+      keyPoints: [
+        "Фиксируем факты и приоритеты вместо взаимных претензий.",
+        "Признаем напряжение, но не поддаемся на провокацию.",
+        "Переводим разговор в конкретные действия и сроки.",
+      ],
+      practiceBridge: "В вопросах этапа ты потренируешь фразы, которые охлаждают конфликт и удерживают рабочий фокус.",
+    },
+    {
+      title: "Этап 3. Контракт решений",
+      summary: "После деэскалации нужно закрепить договоренности, иначе конфликт вернется в новом виде.",
+      keyPoints: [
+        "Формулируем следующий шаг и ответственного.",
+        "Уточняем критерий результата, чтобы не спорить повторно.",
+        "Закрываем обсуждение коротким подтверждением общего плана.",
+      ],
+      practiceBridge: "Практика этого этапа учит завершать разговор так, чтобы команда реально двигалась дальше.",
+    },
+    {
+      title: "Этап 4. Конфликт интересов",
+      summary: "Сложные переговоры требуют баланса: уважение к людям и твердость к процессу.",
+      keyPoints: [
+        "Разделяем человека и проблему в формулировках.",
+        "Озвучиваем риски без драматизации и угроз.",
+        "Предлагаем 1-2 рабочих варианта вместо ультиматума.",
+      ],
+      practiceBridge: "В этом этапе ты отработаешь ответы на жесткие реплики в условиях ограниченного времени.",
+    },
+    {
+      title: "Этап 5. Лидерская интеграция",
+      summary: "Финал курса — собрать устойчивый переговорный стиль, который работает в хаосе.",
+      keyPoints: [
+        "Держим тон, цель и границы одновременно.",
+        "Не теряем контакт даже при несогласии.",
+        "Завершаем спор решением, а не эмоциональным истощением.",
+      ],
+      practiceBridge: "Практика финального этапа проверит, насколько твоя тактика стала системной, а не случайной.",
+    },
+  ],
+  "boundary-keeper": [
+    {
+      title: "Этап 1. Право на голос",
+      summary: "Границы начинаются с короткой фразы входа, а не с длинных оправданий.",
+      keyPoints: [
+        "Говорим «мне важно обсудить» вместо ухода в молчание.",
+        "Сохраняем спокойный тон и конкретный запрос по времени.",
+        "Не обесцениваем свои чувства перед началом разговора.",
+      ],
+      practiceBridge: "В практике ты закрепишь первый уверенный вход в сложный разговор.",
+    },
+    {
+      title: "Этап 2. Контакт без самоотмены",
+      summary: "Можно оставаться в диалоге и не растворяться в чужом давлении.",
+      keyPoints: [
+        "Соединяем фразы контакта и границы в одном ответе.",
+        "Не соглашаемся автоматически, чтобы «не обострять».",
+        "Выбираем язык равного взрослого общения.",
+      ],
+      practiceBridge: "Практические сцены этапа научат удерживать «я здесь, но мне так не подходит».",
+    },
+    {
+      title: "Этап 3. Уверенное «нет»",
+      summary: "Отказ становится экологичным, когда в нем есть ясность и уважение.",
+      keyPoints: [
+        "Отказываем по действию, не атакуя личность.",
+        "При необходимости даем реалистичную альтернативу.",
+        "Не перегружаем ответ извинениями и самообвинением.",
+      ],
+      practiceBridge: "В вопросах этапа ты натренируешь отказ без вины и без конфликта ради конфликта.",
+    },
+    {
+      title: "Этап 4. Защита границ в стрессе",
+      summary: "Под давлением важно не идеальный текст, а устойчивый каркас ответа.",
+      keyPoints: [
+        "Фиксируем неприемлемый формат общения.",
+        "Возвращаем диалог к задаче и правилам взаимодействия.",
+        "Сохраняем ровный ритм и короткие предложения.",
+      ],
+      practiceBridge: "Практика этапа моделирует ситуации, где границу нужно держать быстро и четко.",
+    },
+    {
+      title: "Этап 5. Личная опора",
+      summary: "Финальная цель курса — чтобы границы стали естественной частью твоего стиля.",
+      keyPoints: [
+        "Поддерживаем границу последовательно, а не эпизодически.",
+        "Не путаем мягкость с уступкой себе во вред.",
+        "Завершаем разговор на условиях взаимного уважения.",
+      ],
+      practiceBridge: "Финальная практика покажет, как ты удерживаешь себя и контакт одновременно.",
+    },
+  ],
+  "serpentine-diplomat": [
+    {
+      title: "Этап 1. Прямота без яда",
+      summary: "В сложных статусных играх сила — в ясности, а не в саркастичных ударах.",
+      keyPoints: [
+        "Переводим намеки в прямую формулировку цели.",
+        "Избегаем иронии, которая разрушает доверие.",
+        "Фиксируем тему разговора, чтобы не уходить в личное.",
+      ],
+      practiceBridge: "На практике этапа ты отработаешь дипломатичный ответ вместо колкости.",
+    },
+    {
+      title: "Этап 2. Управление интригой",
+      summary: "Не каждая провокация требует ответа в том же жанре.",
+      keyPoints: [
+        "Отказываемся от участия в токсичных коалициях.",
+        "Удерживаем нейтральную, но твердую позицию.",
+        "Показываем фокус на результате, а не на кулуарной борьбе.",
+      ],
+      practiceBridge: "Сцены этапа помогут тренировать статус без токсичности.",
+    },
+    {
+      title: "Этап 3. Речь влияния",
+      summary: "Влияние строится на точности и последовательности, а не на театральной жесткости.",
+      keyPoints: [
+        "Говорим конкретно: факт, риск, предложение.",
+        "Сохраняем темп, но не торопим собеседника угрозой.",
+        "Проверяем понимание, чтобы избежать двусмысленности.",
+      ],
+      practiceBridge: "Практика этапа соберет в один навык хладнокровие, ясность и направление разговора.",
+    },
+    {
+      title: "Этап 4. Публичное давление",
+      summary: "Под взглядом аудитории особенно важно держать рамку уважительного диалога.",
+      keyPoints: [
+        "Не отвечаем унижением на унижение.",
+        "Сужаем обсуждение до проверяемых фактов.",
+        "Предлагаем шаг, который можно выполнить сразу.",
+      ],
+      practiceBridge: "В этом этапе ты потренируешь реплики для публичных и конфликтных сцен.",
+    },
+    {
+      title: "Этап 5. Стратегическая зрелость",
+      summary: "Финал курса — использовать влияние так, чтобы после разговора оставался рабочий союз.",
+      keyPoints: [
+        "Комбинируем границу, эмпатию и деловую структуру.",
+        "Не теряем ценности под давлением статуса.",
+        "Выходим из конфликта с договором, а не с шрамом.",
+      ],
+      practiceBridge: "Финальная практика проверит твою способность удерживать влияние без потери этики.",
+    },
+  ],
+  "heart-lines": [
+    {
+      title: "Этап 1. Теплый старт",
+      summary: "Близость становится безопасной, когда ты говоришь о себе честно и спокойно.",
+      keyPoints: [
+        "Озвучиваем чувство без обвинения партнера.",
+        "Сохраняем «мы», не теряя «я».",
+        "Начинаем разговор с цели, а не с претензии.",
+      ],
+      practiceBridge: "На практике этапа ты закрепишь вход в диалог: тепло + ясность.",
+    },
+    {
+      title: "Этап 2. Граница без вины",
+      summary: "Экологичная близость невозможна без права на собственные пределы.",
+      keyPoints: [
+        "Отказываемся от лишних извинений за свои потребности.",
+        "Проговариваем границу коротко и уважительно.",
+        "Не путаем уступчивость с заботой о связи.",
+      ],
+      practiceBridge: "Практика этапа тренирует уверенную границу без холодности.",
+    },
+    {
+      title: "Этап 3. Ремонт после трения",
+      summary: "Конфликт не разрушает отношения, если после него есть восстановление контакта.",
+      keyPoints: [
+        "Берем ответственность за резкость, если она была.",
+        "Возвращаем разговор к фактам и потребностям.",
+        "Договариваемся о следующем шаге, а не зависаем в обиде.",
+      ],
+      practiceBridge: "В сценах этапа ты отработаешь быстрый и зрелый ремонт после срыва.",
+    },
+    {
+      title: "Этап 4. Уязвимость и опора",
+      summary: "Сильная позиция в отношениях — это и открытость, и самоуважение.",
+      keyPoints: [
+        "Говорим о боли без драматизации и обвинений.",
+        "Уточняем ожидания, чтобы не жить в догадках.",
+        "Проверяем взаимность через конкретные действия.",
+      ],
+      practiceBridge: "Этап помогает перевести эмоциональные темы в ясные договоренности.",
+    },
+    {
+      title: "Этап 5. Зрелая близость",
+      summary: "Финал курса — навык быть в контакте, не теряя себя в отношениях.",
+      keyPoints: [
+        "Сохраняем тепло и границы в одном сообщении.",
+        "Различаем любовь, страх потери и привычку терпеть.",
+        "Выбираем решения, которые поддерживают обе стороны.",
+      ],
+      practiceBridge: "Финальная практика покажет, насколько устойчиво ты держишь баланс близости и границ.",
+    },
+  ],
+  "mirror-of-truth": [
+    {
+      title: "Этап 1. Ясность в напряжении",
+      summary: "Под давлением первым рушится фокус, поэтому важен короткий каркас ответа.",
+      keyPoints: [
+        "Отделяем факт от интерпретации.",
+        "Не принимаем чужой ультиматум как единственный формат.",
+        "Возвращаем диалог к вариантам решения.",
+      ],
+      practiceBridge: "На практике этапа ты отработаешь реакции на жесткие сценарии без потери себя.",
+    },
+    {
+      title: "Этап 2. Анти-манипуляция",
+      summary: "Манипуляции ослабевают, когда ты называешь их механизм и держишь рамку.",
+      keyPoints: [
+        "Распознаем давление через вину, страх и срочность.",
+        "Отказываемся играть в ложный выбор «или/или».",
+        "Фиксируем приемлемый формат разговора.",
+      ],
+      practiceBridge: "Сцены этапа тренируют устойчивость к обесцениванию и эмоциональному шантажу.",
+    },
+    {
+      title: "Этап 3. Восстановление позиции",
+      summary: "Даже после ошибки можно вернуть качество диалога, если действовать осознанно.",
+      keyPoints: [
+        "Признаем срыв без самоунижения.",
+        "Перезапускаем разговор через факт и следующий шаг.",
+        "Укрепляем внутреннюю опору в реальном времени.",
+      ],
+      practiceBridge: "Практика этапа учит быстро восстанавливать управляемость разговора.",
+    },
+    {
+      title: "Этап 4. Системная точность",
+      summary: "Сложные конфликты решаются системно: критерии, границы, ответственность.",
+      keyPoints: [
+        "Формулируем проверяемые условия договоренности.",
+        "Сохраняем уважение даже при жестком несогласии.",
+        "Держим связь между решением и последствиями.",
+      ],
+      practiceBridge: "Этап отрабатывает лидерскую коммуникацию в конфликте высокой ставки.",
+    },
+    {
+      title: "Этап 5. Интеграция зрелости",
+      summary: "Финал курса — видеть правду ситуации и выбирать стратегию, за которую не стыдно.",
+      keyPoints: [
+        "Не уступаем манипуляции, но сохраняем человечность.",
+        "Соединяем твердость, точность и экологичный тон.",
+        "Завершаем конфликт ясным договором или честной развязкой.",
+      ],
+      practiceBridge: "Финальная практика проверит целостность твоего стиля в самых сложных сценах.",
+    },
+  ],
+};
 
 const diagnosticReportByStyle: Record<ConflictStyleId, DiagnosticReport> = {
   competitive: {
@@ -4685,6 +4954,8 @@ export default function App() {
   const [eventWrongSingleIndex, setEventWrongSingleIndex] = useState<number | null>(null);
   const [eventStepErrorCount, setEventStepErrorCount] = useState(0);
   const [eventStepMessage, setEventStepMessage] = useState("Вступи в ивент и запусти первый шаг.");
+  const [eventLastStepPraise, setEventLastStepPraise] = useState("");
+  const [eventReactionAccent, setEventReactionAccent] = useState("#34D399");
   const [eventShowHint, setEventShowHint] = useState(false);
   const [empathyPairs, setEmpathyPairs] = useState<EmpathyPairView[]>([]);
   const [pairFriendEmailDraft, setPairFriendEmailDraft] = useState("");
@@ -4786,6 +5057,7 @@ export default function App() {
   const stageTacticUsageRef = useRef<Record<BranchId, number>>(createEmptyStageTacticUsage());
   const [stageForgivenErrorByType, setStageForgivenErrorByType] = useState<Record<string, number>>({});
   const [stageProgressSummary, setStageProgressSummary] = useState<StageProgressSummary | null>(null);
+  const [pendingCourseTheoryStageIdx, setPendingCourseTheoryStageIdx] = useState<number | null>(null);
   const [questFinalSummary, setQuestFinalSummary] = useState<QuestFinalSummary | null>(null);
   const [, setAnalyticsSnapshot] = useState<Record<string, UserAnalytics>>({});
   const [adminUsers, setAdminUsers] = useState<AdminUserView[]>([]);
@@ -5251,9 +5523,14 @@ export default function App() {
 
     if (isServerAuth) {
       try {
+        const details = payload.details ?? "";
+        const parsedErrorType = details.match(/type:([^;]+)/)?.[1]?.trim();
+        const parsedTactic = details.match(/tactic:([^;]+)/)?.[1]?.trim();
         await analyticsApi.trackEvent({
           type,
           details: payload.details,
+          errorType: parsedErrorType,
+          tactic: parsedTactic && parsedTactic !== "n/a" ? parsedTactic : undefined,
           tab: payload.tab,
           courseId: payload.courseId,
           storyId: payload.storyId,
@@ -5971,6 +6248,8 @@ export default function App() {
       penalties: 0,
     }));
     resetEventStepUi();
+    setEventLastStepPraise("");
+    setEventReactionAccent("#34D399");
     setEventStepMessage("Сезон запущен. Пройди 10 сцен и забери артефакт.");
     trackAnalyticsEvent("event_join", { details: `event:${seasonalEventMvp.id}` }).catch(() => undefined);
   };
@@ -6024,6 +6303,15 @@ export default function App() {
         ? `Отлично: +${activeEventStep.rewardXp} XP и +${activeEventStep.rewardEnergy} энергии.`
         : `Шаг принят со штрафом, но ты идешь дальше: +${activeEventStep.rewardXp} XP и +${activeEventStep.rewardEnergy} энергии.`
     );
+    const eventTier = isCorrectOnSubmit ? "good" : "bad";
+    const eventNarrative = isCorrectOnSubmit
+      ? "Ты удержала экологичный формат общения в этой сцене."
+      : "Контакт сохранен, но в следующем шаге можно ответить точнее.";
+    const eventXpPart = isCorrectOnSubmit
+      ? `За шаг: +${activeEventStep.rewardXp} XP и +${activeEventStep.rewardEnergy} энергии`
+      : `За шаг со штрафом: +${activeEventStep.rewardXp} XP и +${activeEventStep.rewardEnergy} энергии`;
+    setEventReactionAccent(isCorrectOnSubmit ? "#34D399" : "#F59E0B");
+    setEventLastStepPraise(formatReactionWithMeta(eventNarrative, eventXpPart, eventTier));
     trackAnalyticsEvent("event_step_pass", {
       details: `event:${seasonalEventMvp.id};step:${activeEventStep.id};correct:${isCorrectOnSubmit ? "yes" : "no"}`,
       stepIndex: eventProgress.currentStep,
@@ -6202,6 +6490,43 @@ export default function App() {
       }
     }
     playSfx("swipe").catch(() => undefined);
+    if (activeProgramMode === "course") {
+      setPendingCourseTheoryStageIdx(stageIdx);
+      setForestStarted(false);
+      setForestFinished(false);
+      setForestStepIndex(startIdx);
+      stageStartedAtRef.current = null;
+      setStepMessage(`Этап ${stageIdx + 1} готов. Сначала короткая теория, затем практика.`);
+      setStageProgressSummary(null);
+      setLastStepPraise("");
+      resetStageAnalytics();
+      resetStepUi();
+      return;
+    }
+    setPendingCourseTheoryStageIdx(null);
+    setForestStarted(true);
+    setForestFinished(false);
+    setForestStepIndex(startIdx);
+    stageStartedAtRef.current = Date.now();
+    setStepMessage(`Этап ${stageIdx + 1} начат: ${getCampaignBlockArc(activeCampaignId, stageIdx)}.`);
+    setStageProgressSummary(null);
+    setLastStepPraise("");
+    resetStageAnalytics();
+    resetStepUi();
+    trackAnalyticsEvent("stage_start", {
+      storyId: selectedStory,
+      details: `stage:${stageIdx + 1};steps:${stageStepCounts[stageIdx]}`,
+      stepIndex: startIdx,
+    }).catch(() => undefined);
+  };
+
+  const startCourseStagePractice = (stageIdx: number) => {
+    const startIdx = stageStartIndices[stageIdx];
+    if (startIdx < 0) {
+      return;
+    }
+    playSfx("swipe").catch(() => undefined);
+    setPendingCourseTheoryStageIdx(null);
     setForestStarted(true);
     setForestFinished(false);
     setForestStepIndex(startIdx);
@@ -6214,7 +6539,7 @@ export default function App() {
     trackAnalyticsEvent("stage_start", {
       courseId: activeProgramMode === "course" ? activeCourse.id : undefined,
       storyId: activeProgramMode === "story" ? selectedStory : undefined,
-      details: `stage:${stageIdx + 1};steps:${stageStepCounts[stageIdx]}`,
+      details: `stage:${stageIdx + 1};steps:${stageStepCounts[stageIdx]};source:course_theory`,
       stepIndex: startIdx,
     }).catch(() => undefined);
   };
@@ -6235,6 +6560,7 @@ export default function App() {
     setPendingStoryRating(0);
     setRatingVoteLocked(false);
     setUnlockedPaidStageKeys([]);
+    setPendingCourseTheoryStageIdx(null);
     stageStartedAtRef.current = null;
     setBranchScore({ strategist: 0, empath: 0, boundary: 0, challenger: 0, architect: 0 });
     setAnswerBucketUsage([0, 0, 0, 0, 0]);
@@ -6273,6 +6599,7 @@ export default function App() {
     setQuestFinalSummary(null);
     setLastStepPraise("");
     setUnlockedPaidStageKeys([]);
+    setPendingCourseTheoryStageIdx(null);
     stageStartedAtRef.current = null;
     setBranchScore({ strategist: 0, empath: 0, boundary: 0, challenger: 0, architect: 0 });
     setAnswerBucketUsage([0, 0, 0, 0, 0]);
@@ -6291,6 +6618,7 @@ export default function App() {
     const finishCue = performanceTier === "bad" || performanceTier === "harsh" ? "quest_finish_negative" : "quest_finish_positive";
     playSfx(finishCue).catch(() => undefined);
     stageStartedAtRef.current = null;
+    setPendingCourseTheoryStageIdx(null);
     setForestFinished(true);
     setCompletedCount((prev) => prev + 1);
     const extendedEndingId = resolveExtendedEndingForNarrativeCampaign(activeCampaignId, performanceTier, branchScore, answerBucketUsage);
@@ -6437,6 +6765,20 @@ export default function App() {
     return `${phrase}${xpPart}. ${formatStepOutcomeQuality(tier)}.`;
   };
 
+  const getCourseTheoryBlock = (courseId: CourseId, stageIdx: number) => {
+    const blocks = courseTheoryByStage[courseId] ?? [];
+    if (!blocks.length) {
+      return null;
+    }
+    const safeIdx = Math.max(0, Math.min(stageIdx, blocks.length - 1));
+    return blocks[safeIdx];
+  };
+
+  const buildDefaultStepReaction = () => {
+    const source = activeForestStep?.opponentSpeech ?? activeForestStep?.dispositionText ?? "";
+    return applyGenderToPlayerReplica(source, effectivePlayerGender) || undefined;
+  };
+
   const resolveSourceOptionIndex = (displayIndex: number) => {
     const mapped = displayOptionOrder[displayIndex];
     if (typeof mapped === "number" && mapped >= 0) {
@@ -6479,6 +6821,8 @@ export default function App() {
     const nextStage = isLastStep ? currentStage : stageIndexByStep[nextStepIndex] ?? currentStage;
     const isStageBoundary = !isLastStep && nextStage !== currentStage;
     if (isLastStep) {
+      const stageDurationSec = stageStartedAtRef.current ? Math.round((Date.now() - stageStartedAtRef.current) / 1000) : 0;
+      buildStageSummary(currentStage, stageDurationSec);
       const rewardText = reward > 0 ? `+${reward} XP` : "без изменений XP";
       setStepMessage(`Квест завершен! За шаг: ${rewardText}.`);
       setLastStepPraise(formatReactionWithMeta(npcReaction, `За предыдущий шаг: ${rewardText}`, tier));
@@ -6553,6 +6897,8 @@ export default function App() {
     const nextStage = isLastStep ? currentStage : stageIndexByStep[nextStepIndex] ?? currentStage;
     const isStageBoundary = !isLastStep && nextStage !== currentStage;
     if (isLastStep) {
+      const stageDurationSec = stageStartedAtRef.current ? Math.round((Date.now() - stageStartedAtRef.current) / 1000) : 0;
+      buildStageSummary(currentStage, stageDurationSec);
       setStepMessage(`${formatReactionWithMeta(npcReaction, `-${penalty} XP`, tier)} Квест завершен.`);
       setLastStepPraise(formatReactionWithMeta(npcReaction, `-${penalty} XP`, tier));
       finishForestQuest();
@@ -6660,12 +7006,20 @@ export default function App() {
     }
 
     if (activeForestStep.type === "multiple") {
+      const selectedSource = selectedMultiple.map((displayIndex) => resolveSourceOptionIndex(displayIndex));
+      const selectedTactic =
+        selectedSource.length > 0
+          ? inferTacticByOptionIndex(
+              Math.round(selectedSource.reduce((acc, value) => acc + value, 0) / Math.max(1, selectedSource.length))
+            )
+          : undefined;
+      const npcReaction = buildDefaultStepReaction();
       if (activeForestStep.acceptAny) {
         if (!selectedMultiple.length) {
           setStepMessage("Выбери хотя бы один вариант.");
           return;
         }
-        passStep();
+        passStep(npcReaction, selectedTactic);
         return;
       }
 
@@ -6676,21 +7030,20 @@ export default function App() {
       }
 
       const correct = [...(activeForestStep.correctMultiple ?? [])].sort((a, b) => a - b);
-      const selected = selectedMultiple
-        .map((displayIndex) => resolveSourceOptionIndex(displayIndex))
-        .sort((a, b) => a - b);
+      const selected = selectedSource.sort((a, b) => a - b);
       const isCorrect = correct.every((value, index) => value === selected[index]);
 
       if (isCorrect) {
-        passStep();
+        passStep(npcReaction, selectedTactic);
         return;
       }
 
-      finalizeIncorrectStepAsAccepted(false, "multiple_mismatch");
+      finalizeIncorrectStepAsAccepted(false, "multiple_mismatch", selectedTactic, npcReaction, "bad");
       return;
     }
 
     if (activeForestStep.type === "builder") {
+      const npcReaction = buildDefaultStepReaction();
       const target = activeForestStep.targetBuilder ?? [];
       if (!builderTokens.length) {
         setStepMessage("Собери фразу из слов, затем проверь шаг.");
@@ -6706,12 +7059,12 @@ export default function App() {
 
       if (isCorrectTokens) {
         setBuilderMismatchIndices([]);
-        passStep();
+        passStep(npcReaction, "architect");
         return;
       }
 
       setBuilderMismatchIndices(mismatchIndices);
-      finalizeIncorrectStepAsAccepted(false, "builder_phrase_mismatch");
+      finalizeIncorrectStepAsAccepted(false, "builder_phrase_mismatch", "architect", npcReaction, "bad");
     }
   };
 
@@ -6721,6 +7074,7 @@ export default function App() {
       return;
     }
     setActiveProgramMode("story");
+    setPendingCourseTheoryStageIdx(null);
     setSelectedStory(storyId);
     if (forestStarted && !forestFinished) {
       trackAnalyticsEvent("drop_off", {
@@ -6747,6 +7101,7 @@ export default function App() {
     }
     playSfx("swipe").catch(() => undefined);
     setActiveProgramMode("story");
+    setPendingCourseTheoryStageIdx(null);
     setSelectedStory(storyId);
     setStartedStoryIds((prev) => (prev.includes(storyId) ? prev : [...prev, storyId]));
     setForestStarted(false);
@@ -7490,6 +7845,10 @@ export default function App() {
   }, [stageRoadItems]);
   const hasExpandedStageRoad = stageRoadItems.length > compactStageRoadItems.length;
   const visibleStageRoadItems = stageRoadExpanded && hasExpandedStageRoad ? stageRoadItems : compactStageRoadItems;
+  const pendingCourseTheoryBlock =
+    activeProgramMode === "course" && pendingCourseTheoryStageIdx !== null
+      ? getCourseTheoryBlock(activeCourse.id, pendingCourseTheoryStageIdx)
+      : null;
   const episodeProgressPercent = Math.round(((forestStepIndex + 1) / Math.max(1, currentForestQuestSteps.length)) * 100);
   const effectiveEpisodeProgressPercent = forestFinished ? 100 : episodeProgressPercent;
   const questProgressPercent = currentForestQuestSteps.length
@@ -8245,7 +8604,8 @@ export default function App() {
         <View style={styles.authWrap}>
           <AppCard>
             <Text style={styles.title}>{authMode === "register" ? "Регистрация" : "Вход"}</Text>
-            <Text style={styles.cardText}>Нужен аккаунт, чтобы сохранять прогресс и профиль.</Text>
+            <Text style={styles.cardText}>Softale поможет вам улучшить навыки экологичного общения.</Text>
+            <Text style={styles.cardText}>Создайте аккаунт, чтобы сохранять прогресс и профиль.</Text>
             <TextInput
               value={authEmail}
               onChangeText={(value) => {
@@ -8379,6 +8739,10 @@ export default function App() {
         <View style={styles.authWrap}>
           <AppCard>
             <Text style={styles.title}>Диагностика стиля конфликта</Text>
+            <Text style={styles.cardText}>Добро пожаловать в Softale.</Text>
+            <Text style={styles.cardMeta}>
+              Сейчас пройдем короткий начальный тест, чтобы определить твои тактики в конфликте и подобрать лучший старт.
+            </Text>
             <Text style={styles.cardMeta}>
               Вопрос {diagnosticIndex + 1}/{diagnosticQuestions.length}
             </Text>
@@ -8985,6 +9349,29 @@ export default function App() {
                 <Text style={styles.cardMeta}>Техническая аналитика этапа сохранена в профиле и админке.</Text>
               </AppCard>
             )}
+            {!forestStarted && !forestFinished && pendingCourseTheoryStageIdx !== null && (
+              <AppCard>
+                <Text style={styles.sectionLabel}>Теория перед этапом {pendingCourseTheoryStageIdx + 1}</Text>
+                <Text style={styles.cardTitle}>
+                  {pendingCourseTheoryBlock?.title ?? `Этап ${pendingCourseTheoryStageIdx + 1}`}
+                </Text>
+                <Text style={styles.cardText}>
+                  {pendingCourseTheoryBlock?.summary ?? "Короткий теоретический блок подготовит тебя к практическим вопросам этапа."}
+                </Text>
+                {(pendingCourseTheoryBlock?.keyPoints ?? []).map((point) => (
+                  <Text key={`theory-${pendingCourseTheoryStageIdx}-${point}`} style={styles.cardMeta}>
+                    • {point}
+                  </Text>
+                ))}
+                <Text style={styles.cardMeta}>
+                  {pendingCourseTheoryBlock?.practiceBridge ?? "После теории переходи к практике и закрепляй навык в диалоговых сценах."}
+                </Text>
+                <AppButton
+                  label="Начать практику этапа"
+                  onPress={() => startCourseStagePractice(pendingCourseTheoryStageIdx)}
+                />
+              </AppCard>
+            )}
             {!forestStarted && (
               <AppCard>
                 <Text style={styles.sectionLabel}>Карта этапов</Text>
@@ -9008,6 +9395,7 @@ export default function App() {
                       <View key={`stage-road-${stage.stageIdx}`} style={styles.stageRoadNode}>
                         <Pressable
                           disabled={isLocked}
+                          hitSlop={8}
                           style={[
                             styles.stageDot,
                             stage.isDone && styles.stageDotDone,
@@ -9022,7 +9410,7 @@ export default function App() {
                           <Text style={styles.cardText}>{stage.title}</Text>
                           <Text style={styles.cardMeta}>{stateLabel === "текущий" ? "твой текущий узел" : stateLabel}</Text>
                         </View>
-                        {idx < visibleStageRoadItems.length - 1 && <View style={styles.stageRoadLine} />}
+                        {idx < visibleStageRoadItems.length - 1 && <View pointerEvents="none" style={styles.stageRoadLine} />}
                       </View>
                     );
                   })}
@@ -9240,6 +9628,26 @@ export default function App() {
                   <Text style={styles.cardTitle}>{activeProgramMode === "course" ? "Курс пройден" : "Квест пройден"}</Text>
                 </View>
                 <CardIllustration name="trophy-outline" />
+                {!!lastStepPraise && (
+                  <Text
+                    style={[
+                      styles.praiseText,
+                      {
+                        borderColor: stepReactionAccent,
+                        backgroundColor: `${stepReactionAccent}22`,
+                      },
+                    ]}
+                  >
+                    ✨ {lastStepPraise}
+                  </Text>
+                )}
+                {!!stageProgressSummary && (
+                  <>
+                    <Text style={styles.sectionLabel}>Итог последнего этапа {stageProgressSummary.stageIdx + 1}</Text>
+                    <Text style={styles.cardText}>Длительность: ~{stageProgressSummary.durationSec} сек.</Text>
+                    <Text style={styles.cardText}>{stageProgressSummary.narrative}</Text>
+                  </>
+                )}
                 <Text style={styles.cardText}>Шагов пройдено: {currentForestQuestSteps.length}</Text>
                 <Text style={styles.cardText}>Этапов пройдено: {stageCount}/{stageCount}</Text>
                 <Text style={styles.cardText}>Успехов с 1-й попытки: {firstTrySuccess}</Text>
@@ -9340,6 +9748,19 @@ export default function App() {
                 <AppButton label="Вступить в ивент" onPress={startSeasonEvent} />
               ) : eventProgress.finished ? (
                 <>
+                  {!!eventLastStepPraise && (
+                    <Text
+                      style={[
+                        styles.praiseText,
+                        {
+                          borderColor: eventReactionAccent,
+                          backgroundColor: `${eventReactionAccent}22`,
+                        },
+                      ]}
+                    >
+                      ✨ {eventLastStepPraise}
+                    </Text>
+                  )}
                   <Text style={styles.cardText}>Ивент завершен. {seasonalEventMvp.completionReward.badge}</Text>
                   <Text style={styles.cardMeta}>
                     Финальная награда: +{seasonalEventMvp.completionReward.xp} XP и +{seasonalEventMvp.completionReward.energy} энергии.
@@ -9354,6 +9775,19 @@ export default function App() {
                 </>
               ) : (
                 <>
+                  {!!eventLastStepPraise && (
+                    <Text
+                      style={[
+                        styles.praiseText,
+                        {
+                          borderColor: eventReactionAccent,
+                          backgroundColor: `${eventReactionAccent}22`,
+                        },
+                      ]}
+                    >
+                      ✨ {eventLastStepPraise}
+                    </Text>
+                  )}
                   <Text style={styles.sectionLabel}>Текущая сцена</Text>
                   <Text style={styles.questInstructionText}>{activeEventStep?.scene}</Text>
                   <Text style={styles.sectionLabel}>Что сделать сейчас</Text>
@@ -9497,6 +9931,11 @@ export default function App() {
                     return (
                       <View key={`pair-event-${pair.id}`} style={styles.achievementDetailBox}>
                         <Text style={styles.cardText}>Пара с: {pair.counterpartEmail}</Text>
+                        {pair.invitation.isIncoming ? (
+                          <Text style={styles.cardMeta}>Тебя пригласил(а): {pair.invitation.inviterEmail}</Text>
+                        ) : (
+                          <Text style={styles.cardMeta}>Приглашение отправил(а): ты</Text>
+                        )}
                         <Text style={styles.cardMeta}>
                           Ты: {pair.me.selfActualDone ? "за себя готово" : "за себя не пройдено"} /{" "}
                           {pair.me.friendPredictionDone ? "за друга готово" : "за друга не пройдено"}
@@ -9508,6 +9947,9 @@ export default function App() {
                         {pair.report ? (
                           <>
                             <Text style={styles.cardMeta}>Совпадение ваших реальных ответов: {pair.report.answersOverlapPercent}%</Text>
+                            <Text style={styles.cardMeta}>
+                              Совпало ответов: {pair.report.matchedAnswersCount}/{pair.report.totalAnswersCount}
+                            </Text>
                             <Text style={styles.cardMeta}>Твой уровень эмпатии: {selfEmpathy ?? 0}%</Text>
                             <Text style={styles.cardMeta}>Общий эмпатический процент: {pair.report.overallEmpathyPercent}%</Text>
                             <Text style={styles.cardText}>Ачивка пары: {pair.report.achievement}</Text>
